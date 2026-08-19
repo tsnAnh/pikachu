@@ -106,9 +106,16 @@ Keep it short — it's in every request. Project-level `AGENTS.md` layers on top
 
 ---
 
-## 4. Zero model, thinking, or compaction tuning
+## 4. ⚠️ PARTLY FIXED — model settings existed, but only on the Mac
 
-None of pi's actual behavioral settings are configured. A reasonable `agent/settings.json`:
+This turned out to be worse than "not configured". The machine's live
+`~/.pi/agent/settings.json` *did* carry real tuning — `theme: dark`,
+`defaultProvider: openai-codex`, `defaultModel: gpt-5.6-sol`, `defaultThinkingLevel: high` — and a
+package (`pi-simplify`) that the repo had never heard of. None of it was in git, because the repo
+tracked a file pi never reads (§1). A fresh machine would have reproduced none of it.
+
+**Applied:** those four settings and `pi-simplify` are now in `agent/settings.json`. Compaction,
+retry and `enabledModels` are still unset — the rest of this section still stands:
 
 ```json
 {

@@ -49,15 +49,20 @@ pi setting belongs in this file, not just packages:
 
 ```json
 {
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-5",
-  "defaultThinkingLevel": "medium",
+  "theme": "dark",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-hooks",
     "git:github.com/elpapi42/pi-fork"
   ]
 }
 ```
+
+pi rewrites this file itself (it stores `lastChangelogVersion` here, and `/settings` writes to it),
+so expect it to show up dirty in `git status` from time to time. That is the trade for having the
+config actually version-controlled.
 
 Package sources: `npm:<name>[@version]` or `git:<repo>[@ref]`. Add one by editing this file and re-running the setup script. Avoid `pi install` for packages
 that use the object form — it rewrites entries as plain strings and would drop their filters.
@@ -89,6 +94,7 @@ Declared in [`agent/settings.json`](agent/settings.json).
 | **pi-rtk-optimizer** | RTK command rewriting + `bash`/`grep` output compaction. Config in `agent/extensions/pi-rtk-optimizer/config.json`. |
 | **pi-observational-memory** | Tiered compaction with observations & reflections. |
 | **pi-caveman** | Ultra-compressed output prose, opt-in per session via `/caveman`. |
+| **pi-simplify** | `/simplify` — reviews recently changed code for clarity and maintainability. |
 
 ### Workflow & UI
 
@@ -120,6 +126,11 @@ Don't force-add it.
 
 **`pi-minimal-subagent` was removed.** It registered a tool literally named `subagent`, colliding
 with `pi-subagents`, which is a superset of it.
+
+**`pi-caveman` now comes from npm, not git.** There are two independent implementations of the same
+idea — `npm:pi-caveman` (jonjonrankin) and `git:github.com/v2nic/pi-caveman` — and both register
+`/caveman`. The npm one is what was already installed and working, and it updates through
+`pi update`.
 
 ---
 
