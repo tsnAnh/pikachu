@@ -1,0 +1,14 @@
+{
+  "packages": [
+    "npm:pi-hooks",
+    "npm:pi-rtk-optimizer",
+    "npm:pi-observational-memory",
+    "npm:pi-mermaid",
+    "npm:amp-themes",
+    "npm:pi-powerline-footer",
+    "npm:@tmustier/pi-usage-extension",
+    "git:github.com/elpapi42/pi-minimal-subagent",
+    "git:github.com/elpapi42/pi-fork",
+    "git:github.com/v2nic/pi-caveman"
+  ]
+}
