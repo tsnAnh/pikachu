@@ -125,18 +125,31 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
 
-**The default model needs an OpenCode Zen login.** `agent/settings.json` defaults to
-`opencode` / `deepseek-v4-flash-free` (free tier, $0 in and out). `auth.json` currently only holds
-an `openai-codex` OAuth token, so pi will fail to start a turn until you authenticate:
+**The default model still needs an OpenCode Zen API key.** `agent/settings.json` defaults to
+`opencode` / `deepseek-v4-flash-free` ($0 in and out). "Free" means no charges, not no auth —
+OpenCode's own docs say to sign in, add billing details and copy an API key, and that applies to the
+`-free` models too. The official `opencode` CLI hides this behind a one-time login, which is why it
+feels keyless. pi needs the key explicitly:
 
 ```
 pi        # then: /login  →  OpenCode Zen
 ```
 
-or export `OPENCODE_API_KEY`. Two things to know about this model: its context window is **200k**
-(the paid `deepseek-v4-flash` is 1M), and it is **text-only** — image attachments and `read` on an
-image will not work. Ctrl+P switches models mid-session; `openai-codex/gpt-5.6-sol` is still there
-as the fallback.
+or export `OPENCODE_API_KEY`. `auth.json` currently holds only an `openai-codex` OAuth token.
+
+> **Known problem with this model.** Users report `deepseek-v4-flash-free` returning HTTP 429
+> *"Rate limit exceeded"* on **every** direct OpenAI-compatible API call — with a valid bearer
+> token, from multiple IPs — while the official OpenCode CLI works fine from the same network
+> ([opencode#42074](https://github.com/anomalyco/opencode/issues/42074)). The backend appears to
+> route TUI traffic differently from direct API clients. **pi is a direct API client**, so it falls
+> in the affected category. If every turn 429s, that is this, not your key.
+>
+> Fallbacks: `opencode/deepseek-v4-flash` (paid, 1M context) or `openai-codex/gpt-5.6-sol`, which
+> already works with your existing OAuth token.
+
+Two more limits on the free model: its context window is **200k** (the paid `deepseek-v4-flash` is
+1M), and it is **text-only** — image attachments and `read` on an image will not work. Ctrl+P
+switches models mid-session.
 
 **`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
 would put 11 descriptions in every system prompt. The entry uses
