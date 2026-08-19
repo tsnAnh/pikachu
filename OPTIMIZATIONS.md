@@ -381,6 +381,15 @@ Removing superpowers left `agent/skills/` empty. Pi discovers skills from `~/.pi
 
 That alone may be all the skill config you need.
 
+**Applied:** `emilkowalski/skills` added as a filtered git package —
+`{ "source": "git:github.com/emilkowalski/skills", "skills": ["skills/apple-design"] }`. The repo
+ships 11 skills; the filter loads one. Verified against pi's own matcher: for `SKILL.md` files
+`matchesAnyPattern` also tests the parent directory, so `skills/apple-design` resolves to exactly
+`skills/apple-design/SKILL.md` and excludes the other ten.
+
+Preferred over vendoring the file into `agent/skills/` because `pi update` keeps it current and it
+stays attributed upstream. The trade: no tags on that repo, so it tracks the default branch — see §8.
+
 **Write your own, sparingly.** Skills are progressive disclosure: only the *description* sits in
 every system prompt, the body loads on demand. That makes the description the expensive part — 30
 skills is 30 descriptions in every request, forever. The reason superpowers was worth removing is

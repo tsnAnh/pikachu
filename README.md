@@ -85,6 +85,7 @@ Declared in [`agent/settings.json`](agent/settings.json).
 | **pi-hashline-edit-pro** | Hash-anchored `read` / `replace` / `undo_last_replace`. ⚠️ See *Behavior changes* below. |
 | **pi-ask-user** | `ask_user` — searchable split-pane selection, multi-select, freeform input. |
 | **@dietrichgebert/ponytail** | "Lazy senior dev" skills: `/ponytail`, `-audit`, `-debt`, `-gain`, `-review`. |
+| **emilkowalski/skills** | Skills only, filtered to `apple-design` — Apple's fluid-motion and interface design principles translated to the web. |
 | **pi-fork** | Fork-based isolated subprocess execution. |
 
 ### Context & tokens
@@ -123,6 +124,11 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 (Brave, Tavily, Exa direct, Jina, …) need keys in `web-search.json`. That file lands in **this
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
+
+**`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
+would put 11 descriptions in every system prompt. The entry uses
+`"skills": ["skills/apple-design"]` so only that one loads. Drop the filter if you want the rest —
+the animation ones (`animate`, `review-animations`, `improve-animations`) are the obvious next picks.
 
 **`pi-rtk-optimizer` is behind on tested compatibility.** Its latest release (0.9.0) declares
 `peerDependencies` of `^0.74 || ^0.75 || ^0.78 || ^0.79 || ^0.80` for pi, and pi is now 0.84.2. It
