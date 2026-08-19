@@ -1,13 +1,31 @@
-# Agent runtime data — do not commit
+# ── Pi runtime data lives under agent/. Ignore it all, then re-include the
+#    handful of files that are actually configuration worth version-controlling.
 agent/*
-!agent/skills/
+!agent/settings.json
+!agent/AGENTS.md
 !agent/extensions/
+!agent/skills/
+!agent/prompts/
+!agent/themes/
+
+# ── Hard denials. These sit under agent/ and must NEVER be tracked, even if
+#    someone loosens the negations above.
+agent/auth.json
+agent/trust.json
+agent/models.json
+agent/models-store.json
+agent/sessions/
+agent/git/
+agent/npm/
+
+# ── pi-web-access writes its config to $PI_CODING_AGENT_DIR/web-search.json, and
+#    falls back to ~/.pi/web-search.json when that env var is unset — i.e. the
+#    root of THIS repo. It holds plaintext provider API keys. Never commit it.
+/web-search.json
+
+# ── Extension build artifacts
 agent/extensions/**/node_modules/
 agent/extensions/**/*.lock
 
-# OS
+# ── OS
 .DS_Store
-
-# Runtime directories
-git/
-npm/

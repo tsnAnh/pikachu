@@ -1,0 +1,35 @@
+{
+  "theme": "dark",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "high",
+  "packages": [
+    {
+      "source": "npm:pi-hooks",
+      "extensions": [
+        "!lsp/*.ts"
+      ]
+    },
+    "npm:pi-rtk-optimizer",
+    "npm:pi-observational-memory",
+    "npm:pi-subagents",
+    "npm:pi-web-access",
+    "npm:pi-ask-user",
+    "npm:pi-hashline-edit-pro",
+    "npm:pi-lens",
+    "npm:pi-simplify",
+    "npm:@dietrichgebert/ponytail",
+    "npm:pi-caveman",
+    "npm:pi-mermaid",
+    "npm:amp-themes",
+    "npm:pi-powerline-footer",
+    "npm:@tmustier/pi-usage-extension",
+    "git:github.com/elpapi42/pi-fork",
+    {
+      "source": "git:github.com/emilkowalski/skills",
+      "skills": [
+        "skills/apple-design"
+      ]
+    }
+  ]
+}

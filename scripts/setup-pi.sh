@@ -1,46 +1,97 @@
 #!/usr/bin/env bash
-# Bootstrap all pi packages from settings.json
-set -e
+#
+# Bootstrap the pi environment described by agent/settings.json.
+# Safe to re-run — every step is idempotent. Pass --force to rebuild cm/rtk.
+#
+set -euo pipefail
+
 cd "$(dirname "$0")/.."
+REPO_ROOT="$(pwd)"
+SETTINGS="$REPO_ROOT/agent/settings.json"
+FORCE="${1:-}"
 
-# Prerequisite checks
-for cmd in brew cargo jq; do
-  if ! command -v "$cmd" &>/dev/null; then
-    echo "❌ Error: '$cmd' is required but not installed."
-    exit 1
-  fi
+bold() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
+die()  { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+
+[ -f "$SETTINGS" ] || die "Missing $SETTINGS"
+
+# ── Prerequisites ────────────────────────────────────────────────────
+bold "Checking prerequisites"
+for cmd in pi npm cargo; do
+  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is required but not installed."
+  ok "$cmd"
 done
+if command -v brew >/dev/null 2>&1; then ok "brew"; else warn "Homebrew not found — rtk install will be skipped."; fi
 
-echo "==> Installing rtk from Homebrew..."
-brew install rtk
-echo ""
+# pi-hashline-edit-pro declares engines.node >= 22.19.0. Fail here with a clear
+# message rather than part-way through installing 16 packages.
+NODE_FULL="$(node --version 2>/dev/null | tr -d 'v')"
+NODE_MAJOR="${NODE_FULL%%.*}"
+case "$NODE_MAJOR" in
+  ''|*[!0-9]*) die "Could not determine node version (got '${NODE_FULL:-nothing}')." ;;
+esac
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  die "node $NODE_FULL is too old — pi-hashline-edit-pro needs >= 22.19.0."
+fi
+ok "node $NODE_FULL"
 
-echo "==> Installing CodeMapper (cm)..."
-cargo install --git https://github.com/p1rallels/codemapper.git
-echo ""
-
-echo "==> Bootstrapping pi packages..."
-jq -r '.packages[]' settings.json | while read -r pkg; do
-  echo "  pi install $pkg"
-  pi install "$pkg"
-done
-
-# Link pi-superpowers skills into agent skills dir
-SUPERPOWERS_DIR="$HOME/.pi/agent/git/github.com/coctostan/pi-superpowers"
-if [ -d "$SUPERPOWERS_DIR/skills" ]; then
-  echo ""
-  echo "==> Linking pi-superpowers skills..."
-  SKILLS_DIR="$HOME/.pi/agent/skills"
-  mkdir -p "$SKILLS_DIR"
-  for skill in "$SUPERPOWERS_DIR/skills"/*/; do
-    name=$(basename "$skill")
-    link="$SKILLS_DIR/$name"
-    if [ ! -e "$link" ]; then
-      ln -sf "$skill" "$link"
-      echo "  → Linked $name"
-    fi
-  done
+# ── Is pi actually going to read our settings file? ──────────────────
+# pi reads global settings from $PI_CODING_AGENT_DIR (default ~/.pi/agent).
+# If this repo isn't cloned to ~/.pi, everything below would configure a
+# different settings.json than the one in this repo — silently.
+bold "Checking config location"
+PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+if [ "$(cd "$REPO_ROOT/agent" 2>/dev/null && pwd -P)" = "$(cd "$PI_DIR" 2>/dev/null && pwd -P)" ]; then
+  ok "pi reads $SETTINGS"
+else
+  warn "pi reads its global settings from: $PI_DIR"
+  warn "but this repo's settings file is:   $SETTINGS"
+  warn "Clone this repo to ~/.pi, or export PI_CODING_AGENT_DIR=$REPO_ROOT/agent"
+  die  "Refusing to continue — packages would install against the wrong config."
 fi
 
-echo ""
-echo "==> Done. Verify with: pi list"
+# ── rtk ──────────────────────────────────────────────────────────────
+bold "rtk (token-reducing CLI proxy)"
+if command -v rtk >/dev/null 2>&1 && [ "$FORCE" != "--force" ]; then
+  ok "already installed"
+elif command -v brew >/dev/null 2>&1; then
+  brew install rtk
+else
+  warn "skipped — install Homebrew, then: brew install rtk"
+fi
+
+# ── CodeMapper ───────────────────────────────────────────────────────
+bold "CodeMapper (cm)"
+if command -v cm >/dev/null 2>&1 && [ "$FORCE" != "--force" ]; then
+  ok "already installed — re-run with --force to rebuild"
+else
+  cargo install --locked --git https://github.com/p1rallels/codemapper.git
+fi
+
+# ── Local extension dependencies ─────────────────────────────────────
+# pi runs `npm install` for packages it installs, but NOT for extensions
+# auto-discovered under agent/extensions/. Their deps are ours to install.
+bold "Local extension dependencies"
+found=0
+for pkg_json in agent/extensions/*/package.json; do
+  [ -e "$pkg_json" ] || continue
+  found=1
+  dir="$(dirname "$pkg_json")"
+  echo "    npm install → $dir"
+  (cd "$dir" && npm install --omit=dev --no-audit --no-fund --silent)
+  ok "$(basename "$dir")"
+done
+[ "$found" -eq 1 ] || ok "none to install"
+
+# ── Pi packages ──────────────────────────────────────────────────────
+# `pi update --extensions` installs anything missing and updates the rest,
+# reading agent/settings.json without rewriting it. Do NOT loop over
+# `pi install` here: that rewrites settings.json and would flatten the
+# object-form entries (e.g. the pi-hooks LSP filter) back into plain strings.
+bold "Pi packages"
+pi update --extensions
+
+bold "Done"
+pi list
