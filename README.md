@@ -50,8 +50,8 @@ pi setting belongs in this file, not just packages:
 ```json
 {
   "theme": "dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultProvider": "opencode",
+  "defaultModel": "deepseek-v4-flash-free",
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-hooks",
@@ -124,6 +124,19 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 (Brave, Tavily, Exa direct, Jina, …) need keys in `web-search.json`. That file lands in **this
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
+
+**The default model needs an OpenCode Zen login.** `agent/settings.json` defaults to
+`opencode` / `deepseek-v4-flash-free` (free tier, $0 in and out). `auth.json` currently only holds
+an `openai-codex` OAuth token, so pi will fail to start a turn until you authenticate:
+
+```
+pi        # then: /login  →  OpenCode Zen
+```
+
+or export `OPENCODE_API_KEY`. Two things to know about this model: its context window is **200k**
+(the paid `deepseek-v4-flash` is 1M), and it is **text-only** — image attachments and `read` on an
+image will not work. Ctrl+P switches models mid-session; `openai-codex/gpt-5.6-sol` is still there
+as the fallback.
 
 **`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
 would put 11 descriptions in every system prompt. The entry uses

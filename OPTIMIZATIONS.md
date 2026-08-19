@@ -114,8 +114,14 @@ This turned out to be worse than "not configured". The machine's live
 package (`pi-simplify`) that the repo had never heard of. None of it was in git, because the repo
 tracked a file pi never reads (§1). A fresh machine would have reproduced none of it.
 
-**Applied:** those four settings and `pi-simplify` are now in `agent/settings.json`. Compaction,
-retry and `enabledModels` are still unset — the rest of this section still stands:
+**Applied:** those four settings and `pi-simplify` are now in `agent/settings.json`, and the default
+has since moved to `opencode` / `deepseek-v4-flash-free` — free tier, 200k context, text-only,
+reasoning-capable. Note this needs an OpenCode Zen credential that `auth.json` does not yet have.
+
+`enabledModels` is deliberately still unset: it *scopes* the session rather than just populating the
+Ctrl+P list, so setting it would lock the model picker down to whatever patterns it names. With a
+free model as the default you want the escape hatch wide open, not narrowed. Compaction and retry
+are also still unset — the rest of this section stands:
 
 ```json
 {
