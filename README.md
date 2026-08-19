@@ -50,8 +50,8 @@ pi setting belongs in this file, not just packages:
 ```json
 {
   "theme": "dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultProvider": "opencode",
+  "defaultModel": "deepseek-v4-flash-free",
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-hooks",
@@ -125,10 +125,89 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
 
+**The default model still needs an OpenCode Zen API key.** `agent/settings.json` defaults to
+`opencode` / `deepseek-v4-flash-free` ($0 in and out). "Free" means no charges, not no auth —
+OpenCode's own docs say to sign in, add billing details and copy an API key, and that applies to the
+`-free` models too. The official `opencode` CLI hides this behind a one-time login, which is why it
+feels keyless. pi needs the key explicitly:
+
+```
+pi        # then: /login  →  OpenCode Zen
+```
+
+or export `OPENCODE_API_KEY`. Getting the key:
+
+1. Sign in at <https://opencode.ai/auth> and copy the API key from your account.
+   Billing details are only needed for the **paid** models — the `-free` ones work without a card.
+2. `pi` → `/login` → **OpenCode Zen** → paste. Stored in `agent/auth.json` at `0600` (gitignored).
+   Or `export OPENCODE_API_KEY=...` in your shell rc — `auth.json` takes priority over the env var.
+3. Nothing else to change; `defaultProvider`/`defaultModel` are already set.
+
+The key is the same one the `opencode` CLI uses, so if you have already connected Zen there, copy it
+from the account page rather than generating a second one.
+
+Note the free models are offered "for a limited time" while OpenCode collects feedback — this is not
+a stable long-term default.
+
+> **Known problem with this model.** Users report `deepseek-v4-flash-free` returning HTTP 429
+> *"Rate limit exceeded"* on **every** direct OpenAI-compatible API call — with a valid bearer
+> token, from multiple IPs — while the official OpenCode CLI works fine from the same network
+> ([opencode#42074](https://github.com/anomalyco/opencode/issues/42074)). The backend appears to
+> route TUI traffic differently from direct API clients. **pi is a direct API client**, so it falls
+> in the affected category. If every turn 429s, that is this, not your key.
+>
+> Fallbacks: `opencode/deepseek-v4-flash` (paid, 1M context) or `openai-codex/gpt-5.6-sol`, which
+> already works with your existing OAuth token.
+
+Two more limits on the free model: its context window is **200k** (the paid `deepseek-v4-flash` is
+1M), and it is **text-only** — image attachments and `read` on an image will not work. Ctrl+P
+switches models mid-session.
+
 **`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
 would put 11 descriptions in every system prompt. The entry uses
 `"skills": ["skills/apple-design"]` so only that one loads. Drop the filter if you want the rest —
 the animation ones (`animate`, `review-animations`, `improve-animations`) are the obvious next picks.
+
+**`amp-themes` and `pi-hashline-edit-pro` both claim the `read` tool.** amp-themes'
+`amp-tool-display.ts` re-registers *all* of pi's built-ins (`bash`, `edit`, `find`, `grep`, `ls`,
+`read`, `write`) purely to override their render hooks — it inherits each real `ToolDefinition` and
+swaps only `renderCall`/`renderResult`. Harmless on its own; fatal next to hashline, which registers
+its own `read`. pi refuses to start:
+
+```
+Error: Failed to load extension ".../amp-themes/extensions/amp-tool-display.ts":
+Tool "read" conflicts with .../pi-hashline-edit-pro/index.ts
+```
+
+Resolved with a filter — amp-themes keeps its theme, editor chrome and user-message rendering, and
+gives up only Amp-style tool rendering:
+
+```json
+{ "source": "npm:amp-themes", "extensions": ["!extensions/amp-tool-display.ts"] }
+```
+
+If you would rather have Amp's tool rendering than hash-anchored editing, drop
+`pi-hashline-edit-pro` instead and remove this filter.
+
+**A globally-installed pi package silently shadows this repo's copy.** pi resolves a user-scope
+`npm:` package to `agent/npm/node_modules/<name>` *only if it already exists there*; otherwise it
+falls back to whatever `npm root -g` has and uses that (`getNpmInstallPath` → legacy global path).
+So `npm i -g amp-themes` from months ago wins over the version this repo declares, and the config
+you are reading is not the one running.
+
+```bash
+npm ls -g --depth 0        # see what is shadowing
+npm rm -g amp-themes       # and any other pi-* listed there
+```
+
+`setup-pi.sh` warns about this before it installs anything, but it will not remove anything for
+you — uninstalling from your global npm is your call, not a setup script's.
+
+**`pi-powerline-footer` and `amp-themes` fight over keybindings.** Starting pi prints a cascade of
+`[powerline-footer] Shortcut conflict ...` lines, each one displacing the next, ending with
+`editorEnd: "super+shift+down" is already in use`. Non-fatal, but it means some of those shortcuts
+are not where either package thinks. This is the §6 duplicate-UI problem in practice: pick one of
+the two, or accept remapped keys.
 
 **`pi-rtk-optimizer` is behind on tested compatibility.** Its latest release (0.9.0) declares
 `peerDependencies` of `^0.74 || ^0.75 || ^0.78 || ^0.79 || ^0.80` for pi, and pi is now 0.84.2. It

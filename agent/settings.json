@@ -1,7 +1,7 @@
 {
   "theme": "dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultProvider": "opencode",
+  "defaultModel": "deepseek-v4-flash-free",
   "defaultThinkingLevel": "high",
   "packages": [
     {
@@ -21,7 +21,12 @@
     "npm:@dietrichgebert/ponytail",
     "npm:pi-caveman",
     "npm:pi-mermaid",
-    "npm:amp-themes",
+    {
+      "source": "npm:amp-themes",
+      "extensions": [
+        "!extensions/amp-tool-display.ts"
+      ]
+    },
     "npm:pi-powerline-footer",
     "npm:@tmustier/pi-usage-extension",
     "git:github.com/elpapi42/pi-fork",

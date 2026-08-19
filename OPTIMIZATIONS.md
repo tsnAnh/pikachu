@@ -114,8 +114,14 @@ This turned out to be worse than "not configured". The machine's live
 package (`pi-simplify`) that the repo had never heard of. None of it was in git, because the repo
 tracked a file pi never reads (§1). A fresh machine would have reproduced none of it.
 
-**Applied:** those four settings and `pi-simplify` are now in `agent/settings.json`. Compaction,
-retry and `enabledModels` are still unset — the rest of this section still stands:
+**Applied:** those four settings and `pi-simplify` are now in `agent/settings.json`, and the default
+has since moved to `opencode` / `deepseek-v4-flash-free` — free tier, 200k context, text-only,
+reasoning-capable. Note this needs an OpenCode Zen credential that `auth.json` does not yet have.
+
+`enabledModels` is deliberately still unset: it *scopes* the session rather than just populating the
+Ctrl+P list, so setting it would lock the model picker down to whatever patterns it names. With a
+free model as the default you want the escape hatch wide open, not narrowed. Compaction and retry
+are also still unset — the rest of this section stands:
 
 ```json
 {
@@ -328,6 +334,53 @@ pull. Its state lives in `~/.config/pi-hashline-edit-pro/`, outside this repo.
 | `pi-mermaid` 0.3.0 | peers on `@mariozechner/*` | ✅ Works via the loader alias, but see §10. |
 | `pi-simplify` 0.2.3 | `@sinclair/typebox ^0.34.0` | ✅ pi migrated to `typebox` 1.x but still aliases the legacy root package. |
 | Everything else | `*` | ✅ |
+
+### The collision the audit missed
+
+`amp-themes` + `pi-hashline-edit-pro` → `Tool "read" conflicts`, pi refuses to start.
+
+It surfaced twice, from two different copies of amp-themes, and my pre-install scan missed both.
+
+**First hit:** a stale *globally* npm-installed amp-themes that bundles `pi-tool-display`, which
+registers `read`. My scan walked each package's own source and **skipped `node_modules`**, so a tool
+registered by a bundled dependency was invisible — even though pi's packaging docs explicitly
+describe `bundledDependencies` + `node_modules/` paths as a supported layout.
+
+**Second hit, after removing the global copy:** amp-themes 0.4.1's *own*
+`extensions/amp-tool-display.ts` registers `read` too. It re-registers every built-in
+(`bash`, `edit`, `find`, `grep`, `ls`, `read`, `write`) to override render hooks only. My regex
+looked for a literal `name: "..."` within 600 chars of `registerTool(`; these calls spread a
+`create<Tool>ToolDefinition(cwd)` result, so the name is never a literal. The scan reported 7 tools
+across 15 packages — implausibly few, and I did not treat that as the red flag it was.
+
+Lessons:
+
+1. Scan bundled dependencies, not just a package's own tree.
+2. A tool name can be inherited rather than written literally. Static regex under-reports; treat a
+   suspiciously low count as a failed scan, not a clean one.
+3. The package you audit may not be the package that loads (§ below).
+
+Resolved by filtering: `{ "source": "npm:amp-themes", "extensions": ["!extensions/amp-tool-display.ts"] }`.
+
+### Globally-installed packages shadow this repo
+
+`getNpmInstallPath` returns the managed `agent/npm` path only when it already exists; otherwise it
+falls back to `npm root -g`. Any `npm i -g <pi-package>` therefore overrides what
+`agent/settings.json` declares, silently and permanently, since pi then never installs its own copy.
+
+On this machine that meant `amp-themes`, `pi-hooks`, `pi-rtk-optimizer`, `pi-observational-memory`,
+`pi-mermaid`, `pi-powerline-footer` and `@tmustier/pi-usage-extension` were all resolving to global
+copies — none of them appear in `agent/npm/package.json`. `setup-pi.sh` now detects and warns.
+
+This is the same failure shape as §1: the file you are editing is not the thing that runs.
+
+### Keybinding collisions, observed
+
+`pi-powerline-footer` + `amp-themes` produce a displacement cascade at startup — `jumpChatBottom`
+takes `ctrl+shift+g` → pushed to `super+up`, which displaces `scrollChatUp` → `super+down`, which
+displaces `scrollChatDown`, and so on until `editorEnd` has nowhere to go. Non-fatal, but several
+shortcuts end up somewhere neither package intended. Concrete evidence for §6: these two overlap
+enough that keeping both costs more than it gives.
 
 ### Interactions worth watching
 
