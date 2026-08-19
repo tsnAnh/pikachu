@@ -339,14 +339,28 @@ pull. Its state lives in `~/.config/pi-hashline-edit-pro/`, outside this repo.
 
 `amp-themes` + `pi-hashline-edit-pro` → `Tool "read" conflicts`, pi refuses to start.
 
-My pre-install collision scan walked each package's own source and **skipped `node_modules`**, so a
-tool registered by a *bundled dependency* was invisible to it. An old `amp-themes` bundles
-`pi-tool-display`, which registers `read`. Two lessons:
+It surfaced twice, from two different copies of amp-themes, and my pre-install scan missed both.
 
-1. Scan bundled dependencies too — pi's packaging docs explicitly describe `bundledDependencies` +
-   `node_modules/` paths in the `pi` manifest as a supported layout, so tools can and do live there.
-2. The stale copy was **globally npm-installed** and shadowed the repo's declared version entirely
-   (§ below). The package I audited was not the package that loaded.
+**First hit:** a stale *globally* npm-installed amp-themes that bundles `pi-tool-display`, which
+registers `read`. My scan walked each package's own source and **skipped `node_modules`**, so a tool
+registered by a bundled dependency was invisible — even though pi's packaging docs explicitly
+describe `bundledDependencies` + `node_modules/` paths as a supported layout.
+
+**Second hit, after removing the global copy:** amp-themes 0.4.1's *own*
+`extensions/amp-tool-display.ts` registers `read` too. It re-registers every built-in
+(`bash`, `edit`, `find`, `grep`, `ls`, `read`, `write`) to override render hooks only. My regex
+looked for a literal `name: "..."` within 600 chars of `registerTool(`; these calls spread a
+`create<Tool>ToolDefinition(cwd)` result, so the name is never a literal. The scan reported 7 tools
+across 15 packages — implausibly few, and I did not treat that as the red flag it was.
+
+Lessons:
+
+1. Scan bundled dependencies, not just a package's own tree.
+2. A tool name can be inherited rather than written literally. Static regex under-reports; treat a
+   suspiciously low count as a failed scan, not a clean one.
+3. The package you audit may not be the package that loads (§ below).
+
+Resolved by filtering: `{ "source": "npm:amp-themes", "extensions": ["!extensions/amp-tool-display.ts"] }`.
 
 ### Globally-installed packages shadow this repo
 
@@ -359,6 +373,14 @@ On this machine that meant `amp-themes`, `pi-hooks`, `pi-rtk-optimizer`, `pi-obs
 copies — none of them appear in `agent/npm/package.json`. `setup-pi.sh` now detects and warns.
 
 This is the same failure shape as §1: the file you are editing is not the thing that runs.
+
+### Keybinding collisions, observed
+
+`pi-powerline-footer` + `amp-themes` produce a displacement cascade at startup — `jumpChatBottom`
+takes `ctrl+shift+g` → pushed to `super+up`, which displaces `scrollChatUp` → `super+down`, which
+displaces `scrollChatDown`, and so on until `editorEnd` has nowhere to go. Non-fatal, but several
+shortcuts end up somewhere neither package intended. Concrete evidence for §6: these two overlap
+enough that keeping both costs more than it gives.
 
 ### Interactions worth watching
 

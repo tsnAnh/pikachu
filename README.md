@@ -156,30 +156,46 @@ would put 11 descriptions in every system prompt. The entry uses
 `"skills": ["skills/apple-design"]` so only that one loads. Drop the filter if you want the rest —
 the animation ones (`animate`, `review-animations`, `improve-animations`) are the obvious next picks.
 
+**`amp-themes` and `pi-hashline-edit-pro` both claim the `read` tool.** amp-themes'
+`amp-tool-display.ts` re-registers *all* of pi's built-ins (`bash`, `edit`, `find`, `grep`, `ls`,
+`read`, `write`) purely to override their render hooks — it inherits each real `ToolDefinition` and
+swaps only `renderCall`/`renderResult`. Harmless on its own; fatal next to hashline, which registers
+its own `read`. pi refuses to start:
+
+```
+Error: Failed to load extension ".../amp-themes/extensions/amp-tool-display.ts":
+Tool "read" conflicts with .../pi-hashline-edit-pro/index.ts
+```
+
+Resolved with a filter — amp-themes keeps its theme, editor chrome and user-message rendering, and
+gives up only Amp-style tool rendering:
+
+```json
+{ "source": "npm:amp-themes", "extensions": ["!extensions/amp-tool-display.ts"] }
+```
+
+If you would rather have Amp's tool rendering than hash-anchored editing, drop
+`pi-hashline-edit-pro` instead and remove this filter.
+
 **A globally-installed pi package silently shadows this repo's copy.** pi resolves a user-scope
 `npm:` package to `agent/npm/node_modules/<name>` *only if it already exists there*; otherwise it
 falls back to whatever `npm root -g` has and uses that (`getNpmInstallPath` → legacy global path).
 So `npm i -g amp-themes` from months ago wins over the version this repo declares, and the config
 you are reading is not the one running.
 
-This is not hypothetical — it bricks pi:
-
-```
-Error: Failed to load extension ".../lib/node_modules/amp-themes/node_modules/pi-tool-display/index.ts":
-Tool "read" conflicts with ~/.pi/agent/npm/node_modules/pi-hashline-edit-pro/index.ts
-```
-
-An old `amp-themes` bundled `pi-tool-display`, which registers a `read` tool. Current `amp-themes`
-(0.4.1) ships its own tool display and no longer bundles it — there is a test asserting exactly
-that — but the stale global copy still does, and it collides with `pi-hashline-edit-pro`.
-
 ```bash
 npm ls -g --depth 0        # see what is shadowing
 npm rm -g amp-themes       # and any other pi-* listed there
-pi                          # pi now installs its own copies under agent/npm
 ```
 
-`setup-pi.sh` warns about this before it installs anything.
+`setup-pi.sh` warns about this before it installs anything, but it will not remove anything for
+you — uninstalling from your global npm is your call, not a setup script's.
+
+**`pi-powerline-footer` and `amp-themes` fight over keybindings.** Starting pi prints a cascade of
+`[powerline-footer] Shortcut conflict ...` lines, each one displacing the next, ending with
+`editorEnd: "super+shift+down" is already in use`. Non-fatal, but it means some of those shortcuts
+are not where either package thinks. This is the §6 duplicate-UI problem in practice: pick one of
+the two, or accept remapped keys.
 
 **`pi-rtk-optimizer` is behind on tested compatibility.** Its latest release (0.9.0) declares
 `peerDependencies` of `^0.74 || ^0.75 || ^0.78 || ^0.79 || ^0.80` for pi, and pi is now 0.84.2. It
