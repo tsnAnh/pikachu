@@ -318,6 +318,17 @@ pull. Its state lives in `~/.config/pi-hashline-edit-pro/`, outside this repo.
 (`openaiApiKey`, `braveApiKey`, `exaApiKey`, …). Added to `.gitignore`. Setting
 `PI_CODING_AGENT_DIR=~/.pi/agent` in your shell also moves it under the already-ignored `agent/`.
 
+### Version compatibility (checked against pi 0.84.2)
+
+| Package | Declared peer range | Verdict |
+|---|---|---|
+| `pi-rtk-optimizer` 0.9.0 | `^0.74 \|\| ^0.75 \|\| ^0.78 \|\| ^0.79 \|\| ^0.80` | ⚠️ Outside range. Installs (pi uses `--legacy-peer-deps`) but untested against 0.84. |
+| `pi-powerline-footer` 0.15.1 | `>=0.81.0 <0.85.0` | ✅ Fits, but the upper bound means 0.85 will need a bump. |
+| `pi-hashline-edit-pro` 2.6.1 | `engines.node >= 22.19.0` | ✅ Guarded — `setup-pi.sh` now aborts early on older node. |
+| `pi-mermaid` 0.3.0 | peers on `@mariozechner/*` | ✅ Works via the loader alias, but see §10. |
+| `pi-simplify` 0.2.3 | `@sinclair/typebox ^0.34.0` | ✅ pi migrated to `typebox` 1.x but still aliases the legacy root package. |
+| Everything else | `*` | ✅ |
+
 ### Interactions worth watching
 
 - **hashline vs rtk.** rtk compacts only `bash`, `read` and `grep` output. Hashline's tool is also

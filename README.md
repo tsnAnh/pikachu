@@ -124,6 +124,11 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
 
+**`pi-rtk-optimizer` is behind on tested compatibility.** Its latest release (0.9.0) declares
+`peerDependencies` of `^0.74 || ^0.75 || ^0.78 || ^0.79 || ^0.80` for pi, and pi is now 0.84.2. It
+installs anyway — pi passes `--legacy-peer-deps` — but it has not been tested against this pi.
+If tool output starts looking mangled, check `/rtk show` first.
+
 **`pi-minimal-subagent` was removed.** It registered a tool literally named `subagent`, colliding
 with `pi-subagents`, which is a superset of it.
 

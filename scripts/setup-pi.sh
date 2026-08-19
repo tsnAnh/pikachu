@@ -25,6 +25,18 @@ for cmd in pi npm cargo; do
 done
 if command -v brew >/dev/null 2>&1; then ok "brew"; else warn "Homebrew not found — rtk install will be skipped."; fi
 
+# pi-hashline-edit-pro declares engines.node >= 22.19.0. Fail here with a clear
+# message rather than part-way through installing 16 packages.
+NODE_FULL="$(node --version 2>/dev/null | tr -d 'v')"
+NODE_MAJOR="${NODE_FULL%%.*}"
+case "$NODE_MAJOR" in
+  ''|*[!0-9]*) die "Could not determine node version (got '${NODE_FULL:-nothing}')." ;;
+esac
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  die "node $NODE_FULL is too old — pi-hashline-edit-pro needs >= 22.19.0."
+fi
+ok "node $NODE_FULL"
+
 # ── Is pi actually going to read our settings file? ──────────────────
 # pi reads global settings from $PI_CODING_AGENT_DIR (default ~/.pi/agent).
 # If this repo isn't cloned to ~/.pi, everything below would configure a
