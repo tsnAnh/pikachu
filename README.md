@@ -135,7 +135,19 @@ feels keyless. pi needs the key explicitly:
 pi        # then: /login  →  OpenCode Zen
 ```
 
-or export `OPENCODE_API_KEY`. `auth.json` currently holds only an `openai-codex` OAuth token.
+or export `OPENCODE_API_KEY`. Getting the key:
+
+1. Sign in at <https://opencode.ai/auth> and copy the API key from your account.
+   Billing details are only needed for the **paid** models — the `-free` ones work without a card.
+2. `pi` → `/login` → **OpenCode Zen** → paste. Stored in `agent/auth.json` at `0600` (gitignored).
+   Or `export OPENCODE_API_KEY=...` in your shell rc — `auth.json` takes priority over the env var.
+3. Nothing else to change; `defaultProvider`/`defaultModel` are already set.
+
+The key is the same one the `opencode` CLI uses, so if you have already connected Zen there, copy it
+from the account page rather than generating a second one.
+
+Note the free models are offered "for a limited time" while OpenCode collects feedback — this is not
+a stable long-term default.
 
 > **Known problem with this model.** Users report `deepseek-v4-flash-free` returning HTTP 429
 > *"Rate limit exceeded"* on **every** direct OpenAI-compatible API call — with a valid bearer
