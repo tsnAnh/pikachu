@@ -3,8 +3,8 @@
 Audited against pi upstream docs (`earendil-works/pi`, `packages/coding-agent/docs/`) and the
 package manager source.
 
-**Status:** §1, §2 and §11 are **fixed** in this branch. §3–§10 remain as a backlog.
-§12 is a shortlist of packages worth adding, §13 covers skills.
+**Status:** §1, §2, §6 (partly), §7, §9, §11 and §12 are **applied**. §3–§5, §8, §10 remain as a
+backlog. §13 covers skills, §14 ranks token optimizations.
 
 ---
 
@@ -41,10 +41,16 @@ path.
 Note for the migration: if the machine already has a `~/.pi/agent/settings.json`, git will refuse
 to check out over it. Move it aside first, then merge anything worth keeping.
 
-Worth knowing for later: pi **auto-installs missing packages from global settings on startup**
-(`PackageManager.resolvePackageSources` → `installMissing`), so the `jq` loop is now belt-and-braces
-rather than load-bearing. It's kept because it gives an explicit, greppable bootstrap and a real
-exit code.
+The `jq` loop is gone entirely. `setup-pi.sh` now calls `pi update --extensions`, which reads
+`agent/settings.json`, clones/installs anything missing (`updateGit` clones when the target dir is
+absent; `shouldUpdateNpmSource` returns true when nothing is installed) and updates the rest —
+without rewriting the settings file. That last part matters now that §7 uses an object-form entry:
+looping over `pi install` would have rewritten `{ "source": "npm:pi-hooks", "extensions": [...] }`
+back to the plain string `"npm:pi-hooks"` and silently dropped the LSP filter on the first run.
+
+The script also now refuses to run when `agent/` isn't the directory pi actually reads
+(`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) — the same class of mistake as the original bug,
+caught at the door rather than discovered months later.
 
 ---
 
@@ -58,10 +64,9 @@ nothing in `setup-pi.sh` creates one, so the extension throws on load.
 **Applied:** `setup-pi.sh` now walks `agent/extensions/*/package.json` and runs
 `npm install --omit=dev` in each; `update-pi.sh` runs `npm update` in the same places.
 
-**Still worth doing:** either promote `web-fetch` to a real pi package (so pi installs its deps and
-`pi update` maintains it), or replace it outright with `pi-web-access` — see §12. Pi has no built-in
-web tool (built-ins are only `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), so this
-capability is load-bearing and shouldn't depend on a setup step nobody re-runs.
+**Resolved for good:** `web-fetch/` was replaced by `pi-web-access` (§12), so this capability no
+longer depends on a setup step nobody re-runs. The dependency-install loop stays in the script for
+any future local extension.
 
 ---
 
@@ -167,24 +172,28 @@ fires on the outputs that matter and low enough to decapitate a long test run. M
 - **`agent/extensions/context.ts` + `@tmustier/pi-usage-extension`** — both are context/usage/cost
   dashboards. 536 lines of local TypeScript to maintain against a package that does the same job.
   Keep one. (If `context.ts`'s per-tool token grid is the reason to keep it, drop the npm package.)
+- ✅ The other two local extensions are gone: `web-fetch/` → `pi-web-access`,
+  `ask-user-question.ts` → `pi-ask-user`.
 
 ---
 
-## 7. `pi-hooks` loads all five of its extensions
+## 7. ✅ FIXED — `pi-hooks` loaded all of its extensions
 
-`pi-hooks` bundles `checkpoint`, `lsp`, `permission`, `ralph-loop`, and `repeat`. String form loads
-everything; each registers tools and commands that cost system-prompt tokens on every request. Use
-the object form to load only what you use:
+`pi-hooks` bundles seven extensions: `checkpoint`, `lsp`, `lsp-tool`, `permission`, `ralph-loop`,
+`repeat`, `token-rate`. String form loads all of them.
+
+**Applied:** switched to object form excluding the LSP pair, since `pi-lens` now owns LSP and
+running two LSP layers means two sets of language servers for the same project:
 
 ```json
-{
-  "packages": [
-    { "source": "npm:pi-hooks", "extensions": ["extensions/checkpoint.ts", "extensions/lsp.ts"] }
-  ]
-}
+{ "source": "npm:pi-hooks", "extensions": ["!lsp/*.ts"] }
 ```
 
-(Check the actual filenames with `pi config`, which also lets you toggle resources interactively.)
+`applyPatterns` in pi's package manager treats a filter list with no positive includes as
+"everything, minus the exclusions", so this loads the other five. Verified against the package's
+actual manifest paths.
+
+`pi config` toggles these interactively if you want to trim further.
 
 ---
 
@@ -212,11 +221,13 @@ Two problems for a repo whose whole purpose is "reproduce my environment on a ne
 
 ## 9. ✅ MOSTLY FIXED — `setup-pi.sh` hardening
 
-**Applied:** `set -euo pipefail`; the `jq | while read` subshell replaced with process substitution
-so a failed `pi install` actually aborts; `rtk` and `cm` skipped when already present (`--force` to
-rebuild); `cargo install --locked`; prereq checks extended to `pi` and `npm`; `brew` downgraded to a
-warning so the script runs on Linux. Shellcheck-clean at `-S warning`. A companion
-`scripts/update-pi.sh` covers "update everything to latest".
+**Applied:** `set -euo pipefail`; the `jq | while read` loop over `pi install` replaced outright
+with `pi update --extensions` (see §1 — it installs missing packages *and* leaves settings.json
+alone); a guard that aborts when `agent/` isn't pi's real config dir; `rtk` and `cm` skipped when
+already present (`--force` to rebuild); `cargo install --locked`; prereq checks extended to `pi` and
+`npm`, with `jq` no longer needed at all; `brew` downgraded to a warning so the script runs on
+Linux. Shellcheck-clean at `-S warning`. A companion `scripts/update-pi.sh` covers "update
+everything to latest".
 
 **Not done:** pinning the `cm` build to a tag/rev — the repo publishes no tags, so this needs a
 commit SHA choice you should make deliberately.
@@ -262,37 +273,78 @@ All fixed in the README rewrite:
 
 ---
 
-## 12. Packages worth adding
+## 12. ✅ APPLIED — packages added
 
-The pi package ecosystem has grown a lot (120+ on npm under `keywords:pi-package`). Ranked by what
-this specific config is missing. Note that **`pi-powerline-footer`, already installed here, is by
-`nicobailon`** — the first three below are by the same author, so they're a known quantity.
+Six packages added, one removed. Verified before install: manifests read, tool names extracted, and
+the whole set checked for collisions against pi's built-ins (`read`, `bash`, `edit`, `write`,
+`grep`, `find`, `ls`) and against each other.
 
-### Strong fits
+| Added | Version | Registers |
+|---|---|---|
+| `pi-web-access` | 0.24.0 | `web_search`, `fetch_content`, `source_check`, `get_search_content` |
+| `pi-subagents` | 0.51.0 | `subagent`, `subagent_wait`, `agent`, `contact_supervisor`, `structured_output`, watchdog tools |
+| `pi-hashline-edit-pro` | 2.6.1 | `read` (override), `replace`, `undo_last_replace` |
+| `pi-lens` | 4.0.1 | `analyze`, `lsp_diagnostics`, `lsp_navigation`, `ast_grep_search`/`_replace`, `module_report`, `read_symbol` |
+| `pi-ask-user` | 0.14.0 | `ask_user` |
+| `@dietrichgebert/ponytail` | 4.9.0 | no tools — 6 skills (`ponytail`, `-audit`, `-debt`, `-gain`, `-help`, `-review`) |
 
-| Package | Why it fits here |
-|---|---|
-| **`pi-web-access`** (0.24.0) | Web search + URL fetch + GitHub repo cloning + PDF extraction + YouTube, with pluggable providers (Brave, Tavily, Exa, Firecrawl, Jina, …). This is a **superset of the local `web-fetch/` extension** and it's a maintained package, so its deps install themselves and `pi update` maintains it. Adopting it retires ~650 lines of local TypeScript and the §2 class of bug permanently. |
-| **`pi-subagents`** (0.51.0) | Single-agent delegation + scripted multi-agent workflows. The **single biggest token lever available** — a subagent burns its own context window and returns a summary, so exploration never lands in the parent transcript. Much richer than the `pi-minimal-subagent` currently installed; consider it a replacement, not an addition. (`@gotgenes/pi-subagents` 19.3.2 is a more API-focused alternative other extensions build on.) |
-| **`pi-mcp-adapter`** (2.26.1) or **`pi-mcp-extension`** (1.5.0) | Pi ships with **no MCP support at all** — deliberately. If you use any MCP servers elsewhere (GitHub, Notion, Postgres, Playwright…), one of these is the only way to reach them from pi. |
-| **`cc-safety-net`** (2.0.7) | Blocks destructive commands and reads of secret files. Given `agent/auth.json` sits inside this very repo tree, a guard against the agent reading or committing it is cheap insurance. |
+> Note the scope: the pi package is `@dietrichgebert/ponytail`. The unscoped `ponytail` on npm is an
+> unrelated site-maintenance tool.
 
-### Worth evaluating
+### What had to be resolved
 
-| Package | Note |
-|---|---|
-| **`pi-hashline-edit-pro`** (2.6.1) / **`pi-readseek`** (0.9.13) | Hash-anchored read/edit — every line gets a stable 3-char hash, stale anchors are *rejected* rather than fuzzy-matched. Failed edits are a quiet but large token cost (model re-reads the file, retries, re-reads again). Worth a trial if you see edit churn. |
-| **`pi-background-tasks`** (2.4.2) | Durable background shell tasks + read-only delegated agents. Long builds/test suites stop blocking the turn. |
-| **`pi-lens`** (4.0.1) | Real-time LSP/lint/typecheck feedback. Overlaps `pi-hooks`'s `lsp` — pick one. |
-| **`@narumitw/pi-plan-mode`** (0.49.3) | Codex-style read-only `/plan` mode. This is roughly the useful half of what superpowers' `writing-plans` gave you, without the skill sprawl. |
-| **`pi-zentui`** (0.20.1) | Starship-inspired statusline + OpenCode-style TUI. A single coherent alternative to `amp-themes` + `pi-powerline-footer` fighting over the same chrome (§6). |
-| **`pi-ask-user`** (0.14.0) | Split-pane searchable ask-user tool — the maintained version of the local `ask-user-question.ts`. |
+**`pi-minimal-subagent` removed — hard collision.** It registers a tool named exactly `subagent`,
+and so does `pi-subagents`. Two extensions claiming one tool name is not a preference question.
+`pi-subagents` is a strict superset (scripted multi-agent workflows, supervisor contact, watchdog),
+so it wins.
+
+**`pi-hooks` filtered to drop its LSP pair** — see §7.
+
+**`pi-hashline-edit-pro` removes the built-in `edit` tool.** Not a collision, an intentional
+override: `session_start` calls `setActiveTools(active.filter(t => t !== "edit"))`. Worth
+re-checking after a week of use — if edits feel worse rather than better, this is the package to
+pull. Its state lives in `~/.config/pi-hashline-edit-pro/`, outside this repo.
+
+**`pi-web-access` config leaks into the repo root.** `getWebSearchConfigDir()` returns
+`PI_CODING_AGENT_DIR` if set, else `~/.pi` — *not* `~/.pi/agent`. With this repo cloned to `~/.pi`,
+`web-search.json` lands in the tracked root, and it holds plaintext provider API keys
+(`openaiApiKey`, `braveApiKey`, `exaApiKey`, …). Added to `.gitignore`. Setting
+`PI_CODING_AGENT_DIR=~/.pi/agent` in your shell also moves it under the already-ignored `agent/`.
+
+### Interactions worth watching
+
+- **hashline vs rtk.** rtk compacts only `bash`, `read` and `grep` output. Hashline's tool is also
+  named `read`, so rtk's read path *does* see it — but `readCompaction.enabled` is `false` in
+  `config.json`, and `compactReadText` returns the text untouched in that case, before any
+  truncation. Anchors survive byte-exact. rtk even has a `looksLikeAnchoredReadOutput` branch, so
+  the two were built with each other in mind. **Don't turn on `readCompaction` without re-testing.**
+- **hashline `read` vs pi-lens `read_symbol`.** Two different read-substitutes, no name collision,
+  but the model now has three ways to read a file. Watch whether it picks sensibly.
+- **`pi-lens` manifest quirk.** Its `package.json` declares `"skills": ["../../skills"]`, a path
+  that escapes the package root. Probably resolves to nothing; harmless, but if its skills don't
+  appear, that's why.
+- **System-prompt growth.** These six add roughly 20 tool descriptions. That is a real per-request
+  cost paid on every turn — the payoff has to come from subagents and fewer failed edits. If it
+  doesn't, `pi config` is where you trim.
+
+### Still on the table
+
+- **`pi-mcp-adapter`** (2.26.1) or **`pi-mcp-extension`** (1.5.0) — pi ships with no MCP support at
+  all. `pi-lens` now brings its own MCP *server*, but not a client. If you use MCP servers
+  elsewhere, this is still the only bridge. (Note: pi's author skipped MCP deliberately.)
+- **`cc-safety-net`** (2.0.7) — blocks destructive commands and secret-file reads. `agent/auth.json`
+  and `web-search.json` both sit inside this repo tree, which is exactly the case it guards.
+- **`pi-background-tasks`** (2.4.2) — long builds and test suites stop blocking the turn.
+- **`pi-zentui`** (0.20.1) — one coherent TUI instead of `amp-themes` + `pi-powerline-footer`
+  competing for the same chrome (§6).
 
 ### Probably skip
 
-- **`context-mode`** — "saves 98% of your context window" is marketing, and it's an MCP plugin, so it'd need the MCP adapter to even load.
+- **`context-mode`** — "saves 98% of your context window" is marketing, and it's an MCP plugin, so
+  it needs an adapter to load at all.
 - **`bigpowers`** / **`superpowers-zh`** — superpowers derivatives. You just removed superpowers.
-- **`@hypabolic/pi-hypa`** — rewrites noisy shell commands out of context; that's what `pi-rtk-optimizer` already does. Don't stack two.
+- **`@hypabolic/pi-hypa`** — rewrites noisy shell commands out of context, which is what
+  `pi-rtk-optimizer` already does. Don't stack two.
 
 ---
 
@@ -328,9 +380,10 @@ Set `"enableSkillCommands": true` (the default) so each is also reachable as `/s
 
 Ordered by how much they save, not how easy they are.
 
-1. **Subagents for exploration** (§12). "Find every caller of X and tell me which ones need
-   updating" costs 40k tokens in the main context and ~1k as a delegated summary. Nothing else on
-   this list is in the same order of magnitude.
+1. **Subagents for exploration** — ✅ `pi-subagents` installed. "Find every caller of X and tell me
+   which ones need updating" costs 40k tokens in the main context and ~1k as a delegated summary.
+   Nothing else on this list is in the same order of magnitude. This only pays off if you actually
+   reach for it, so it belongs in `AGENTS.md` (§3).
 
 2. **Protect the prompt cache.** A cache hit is roughly a 10× cost reduction on the prefix. Anything
    that mutates earlier context — compaction, memory rewrites, injected notices — invalidates it.
@@ -338,9 +391,10 @@ Ordered by how much they save, not how easy they are.
    quietly losing money. Turn on `showCacheMissNotices: true`, export `PI_CACHE_RETENTION=long`, and
    watch for churn.
 
-3. **`cm` instead of grep + read.** `cm query`/`callers`/`trace` return a symbol and its edges;
+3. **Structural search instead of grep + read.** `cm query`/`callers`/`trace`, and now
+   `pi-lens`'s `ast_grep_search` / `module_report` / `read_symbol`, return a symbol and its edges;
    grep returns hits you then have to `read` files to interpret. But **it only helps if the model
-   knows to use it** — see §3. Right now it doesn't.
+   knows to reach for it** — see §3. Right now it doesn't.
 
 4. **Right-size thinking.** `defaultThinkingLevel` plus per-level `thinkingBudgets` (§4). Reasoning
    tokens are billed and often invisible; `medium` with a 10k budget is a very different bill from
@@ -353,8 +407,9 @@ Ordered by how much they save, not how easy they are.
    installed. Measure it with `/rtk stats` before tuning `truncate.maxChars`.
 
 7. **Trim the loaded surface.** Every extension's tools and commands are described in the system
-   prompt on *every* request. `pi-hooks` alone contributes five extensions (§7). `pi config` shows
-   what's actually loaded; `defaultTools` can drop built-ins you never use.
+   prompt on *every* request — and §12 just added ~20 descriptions. This now cuts both ways: the new
+   packages have to earn that overhead. `pi config` shows what's actually loaded; `defaultTools` can
+   drop built-ins you never use.
 
 8. **`pi-caveman`.** Cuts output prose, which is the cheapest half of the bill. Nice to have, not a
    strategy — and it's opt-in per session anyway.

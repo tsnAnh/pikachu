@@ -14,6 +14,8 @@ warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
 command -v pi >/dev/null 2>&1 || { printf '\033[31m✗ pi is not installed\033[0m\n' >&2; exit 1; }
 
 bold "pi CLI + packages"
+# --all covers self + packages; it reads agent/settings.json without rewriting it,
+# so object-form entries (the pi-hooks LSP filter) survive.
 pi update --all
 
 bold "Model catalogs"

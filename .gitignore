@@ -18,6 +18,11 @@ agent/sessions/
 agent/git/
 agent/npm/
 
+# ── pi-web-access writes its config to $PI_CODING_AGENT_DIR/web-search.json, and
+#    falls back to ~/.pi/web-search.json when that env var is unset — i.e. the
+#    root of THIS repo. It holds plaintext provider API keys. Never commit it.
+/web-search.json
+
 # ── Extension build artifacts
 agent/extensions/**/node_modules/
 agent/extensions/**/*.lock
