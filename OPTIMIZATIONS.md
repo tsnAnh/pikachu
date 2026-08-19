@@ -335,6 +335,31 @@ pull. Its state lives in `~/.config/pi-hashline-edit-pro/`, outside this repo.
 | `pi-simplify` 0.2.3 | `@sinclair/typebox ^0.34.0` | ✅ pi migrated to `typebox` 1.x but still aliases the legacy root package. |
 | Everything else | `*` | ✅ |
 
+### The collision the audit missed
+
+`amp-themes` + `pi-hashline-edit-pro` → `Tool "read" conflicts`, pi refuses to start.
+
+My pre-install collision scan walked each package's own source and **skipped `node_modules`**, so a
+tool registered by a *bundled dependency* was invisible to it. An old `amp-themes` bundles
+`pi-tool-display`, which registers `read`. Two lessons:
+
+1. Scan bundled dependencies too — pi's packaging docs explicitly describe `bundledDependencies` +
+   `node_modules/` paths in the `pi` manifest as a supported layout, so tools can and do live there.
+2. The stale copy was **globally npm-installed** and shadowed the repo's declared version entirely
+   (§ below). The package I audited was not the package that loaded.
+
+### Globally-installed packages shadow this repo
+
+`getNpmInstallPath` returns the managed `agent/npm` path only when it already exists; otherwise it
+falls back to `npm root -g`. Any `npm i -g <pi-package>` therefore overrides what
+`agent/settings.json` declares, silently and permanently, since pi then never installs its own copy.
+
+On this machine that meant `amp-themes`, `pi-hooks`, `pi-rtk-optimizer`, `pi-observational-memory`,
+`pi-mermaid`, `pi-powerline-footer` and `@tmustier/pi-usage-extension` were all resolving to global
+copies — none of them appear in `agent/npm/package.json`. `setup-pi.sh` now detects and warns.
+
+This is the same failure shape as §1: the file you are editing is not the thing that runs.
+
 ### Interactions worth watching
 
 - **hashline vs rtk.** rtk compacts only `bash`, `read` and `grep` output. Hashline's tool is also

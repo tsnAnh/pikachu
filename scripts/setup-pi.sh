@@ -52,6 +52,40 @@ else
   die  "Refusing to continue — packages would install against the wrong config."
 fi
 
+# ── Shadowed packages ────────────────────────────────────────────────
+# pi resolves a user-scope npm package to agent/npm/node_modules/<name>, but
+# ONLY if it already exists there. Otherwise it falls back to a globally
+# npm-installed copy and uses that instead (getNpmInstallPath -> legacy global
+# path). A stale `npm i -g <pi-package>` therefore silently shadows the version
+# this repo declares, and the config you are reading is not the one running.
+bold "Checking for globally-installed pi packages"
+GLOBAL_ROOT="$(npm root -g 2>/dev/null || true)"
+shadowed=0
+if [ -n "$GLOBAL_ROOT" ] && [ -d "$GLOBAL_ROOT" ]; then
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -d "$GLOBAL_ROOT/$name" ] && [ ! -d "agent/npm/node_modules/$name" ]; then
+      warn "$name is installed globally and will shadow this repo's copy"
+      shadowed=$((shadowed + 1))
+    fi
+  done < <(node -e '
+    const d = require("./agent/settings.json");
+    for (const p of d.packages) {
+      const s = typeof p === "string" ? p : p.source;
+      if (s.startsWith("npm:")) console.log(s.slice(4).replace(/@[^@/]+$/, ""));
+    }' 2>/dev/null)
+fi
+if [ "$shadowed" -gt 0 ]; then
+  warn ""
+  warn "Remove them so pi manages its own copies under agent/npm:"
+  warn "  npm rm -g <name> ...    # then re-run this script"
+  warn "Stale global copies are a real hazard: an old amp-themes bundles"
+  warn "pi-tool-display, whose 'read' tool collides with pi-hashline-edit-pro"
+  warn "and stops pi from starting at all."
+else
+  ok "none shadowing"
+fi
+
 # ── rtk ──────────────────────────────────────────────────────────────
 bold "rtk (token-reducing CLI proxy)"
 if command -v rtk >/dev/null 2>&1 && [ "$FORCE" != "--force" ]; then
