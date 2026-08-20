@@ -431,8 +431,19 @@ That list was written when pi shipped roughly those tools and no others. It is n
 and the package targets `@mariozechner/pi-*` `^0.70.2` — the pre-rename scope, 14 minor versions
 behind 0.84.2.
 
-The local `plan` skill covered the same need without gutting the toolset, so neither was kept: the
-skill and its `/plan` prompt wrapper were retired at the same time (see below).
+**Adding `grep`/`find`/`ls` to `NORMAL_MODE_TOOLS` would not fix it.** That closes the built-in gap
+but not the real one: an absolute list cannot know about tools contributed by other packages, so
+`subagent`, `web_search`, `fetch_content`, `ask_user`, `replace`, pi-lens's tools and `fork` still
+disappear, and `edit` still returns. The bug is the approach, not the contents of the list.
+
+**Replaced with `agent/extensions/plan-mode.ts`** — same `/plan` toggle, but it never calls
+`setActiveTools`. It gates at `tool_call` and returns `{ block: true, reason }` for anything outside
+a read-only allowlist, so there is no state to restore and tools from packages installed later are
+covered by default. Bash stays available with mutating invocations refused by pattern. Typechecks
+clean against `@earendil-works/pi-coding-agent` under `strict`; the bash pattern is unit-checked
+against 18 cases (`git status` and `npm ls -g` pass, `git commit` and `npm install` do not).
+
+The local `plan` skill and its `/plan` prompt wrapper were retired at the same time.
 
 ### Probably skip
 
@@ -481,6 +492,15 @@ the same reason a hand-rolled replacement should stay small. Good candidates for
 - One skill per recurring project-specific workflow, in that project's `.pi/skills/` rather than globally
 
 Set `"enableSkillCommands": true` (the default) so each is also reachable as `/skill:<name>`.
+
+---
+
+## 15. `grep` is already ripgrep — no work needed
+
+pi's `grep` tool shells out to ripgrep (`core/tools/grep.ts` → `ensureTool("rg")`), with no non-rg
+fallback, and `find` shells out to `fd`. Both prefer a system binary and otherwise download into
+`agent/bin/`. Nothing to swap; renaming the tool to `rg` would only break references in skills and
+prompts. `pi-rtk-optimizer` separately rewrites `grep` typed into `bash`.
 
 ---
 
