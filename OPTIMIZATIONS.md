@@ -409,10 +409,38 @@ enough that keeping both costs more than it gives.
 - **`pi-zentui`** (0.20.1) — one coherent TUI instead of `amp-themes` + `pi-powerline-footer`
   competing for the same chrome (§6).
 
+### Rejected: `pi-plan`
+
+`pi-plan@0.1.1` (read-only plan mode, `/plan` + Ctrl+Alt+P) was evaluated and **not added**.
+
+It manages plan mode by calling `pi.setActiveTools()` with two hardcoded absolute lists:
+
+```ts
+const PLAN_MODE_TOOLS   = ["read", "bash", "grep", "find", "ls"];
+const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+```
+
+`setActiveTools` *replaces* the active set. So leaving plan mode — via the toggle, or by picking
+"Execute the plan" — pins the session to four tools. Everything else is dropped for the rest of that
+session: the built-in `grep`, `find` and `ls`, plus every extension tool this config exists to
+provide (`subagent`, `subagent_wait`, `web_search`, `fetch_content`, `source_check`, `ask_user`,
+`replace`, `undo_last_replace`, all of pi-lens, `fork`). And `edit` comes *back*, which
+pi-hashline-edit-pro removes on purpose.
+
+That list was written when pi shipped roughly those tools and no others. It is not extension-aware,
+and the package targets `@mariozechner/pi-*` `^0.70.2` — the pre-rename scope, 14 minor versions
+behind 0.84.2.
+
+The local `plan` skill covered the same need without gutting the toolset, so neither was kept: the
+skill and its `/plan` prompt wrapper were retired at the same time (see below).
+
 ### Probably skip
 
 - **`context-mode`** — "saves 98% of your context window" is marketing, and it's an MCP plugin, so
   it needs an adapter to load at all.
+- **Any extension that calls `setActiveTools()` with an absolute list.** In a config this
+  extension-heavy, that is a footgun by construction — the author cannot know what else you loaded.
+  Grep for it before installing.
 - **`bigpowers`** / **`superpowers-zh`** — superpowers derivatives. You just removed superpowers.
 - **`@hypabolic/pi-hypa`** — rewrites noisy shell commands out of context, which is what
   `pi-rtk-optimizer` already does. Don't stack two.

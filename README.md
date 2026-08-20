@@ -224,6 +224,15 @@ idea — `npm:pi-caveman` (jonjonrankin) and `git:github.com/v2nic/pi-caveman` �
 
 ---
 
+## 🗂 Retired
+
+- `agent/prompts/plan.md` and `agent/skills/plan/` — moved to `_to_delete/` on the machine. The
+  prompt was a 7-line wrapper around the skill, and both were superseded by the decision to skip
+  `pi-plan` (see `OPTIMIZATIONS.md` §12). `_to_delete/` is gitignored; delete it yourself when
+  you are happy.
+
+---
+
 ## 🧩 Local Extensions
 
 Auto-discovered by pi from `agent/extensions/`:

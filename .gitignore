@@ -18,10 +18,25 @@ agent/sessions/
 agent/git/
 agent/npm/
 
-# ── pi-web-access writes its config to $PI_CODING_AGENT_DIR/web-search.json, and
-#    falls back to ~/.pi/web-search.json when that env var is unset — i.e. the
+# ── pi-web-access writes its config to $PI_CODING_AGENT_DIR/web-search.json
+
+# ── Staging area for files removed on a machine where deletes are blocked.
+#    Safe to remove by hand once you have checked the contents.
+/_to_delete/
+/_backup-precfg/, and
+#    falls back to ~/.pi/web-search.json
+
+# ── Staging area for files removed on a machine where deletes are blocked.
+#    Safe to remove by hand once you have checked the contents.
+/_to_delete/
+/_backup-precfg/ when that env var is unset — i.e. the
 #    root of THIS repo. It holds plaintext provider API keys. Never commit it.
 /web-search.json
+
+# ── Staging area for files removed on a machine where deletes are blocked.
+#    Safe to remove by hand once you have checked the contents.
+/_to_delete/
+/_backup-precfg/
 
 # ── Extension build artifacts
 agent/extensions/**/node_modules/
