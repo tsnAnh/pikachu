@@ -224,6 +224,29 @@ idea — `npm:pi-caveman` (jonjonrankin) and `git:github.com/v2nic/pi-caveman` �
 
 ---
 
+## 🔎 grep is already ripgrep
+
+Worth knowing before reaching for an rg extension: pi's built-in `grep` tool **is** ripgrep.
+`core/tools/grep.ts` calls `ensureTool("rg")` and spawns the binary — there is no non-rg fallback, it
+errors out if rg cannot be obtained. Likewise `find` is `fd`. pi prefers a system `rg`/`fd` if one is
+on `PATH` and otherwise downloads them into `agent/bin/` (that is what the `fd` binary in there is;
+`rg` appears on the first `grep` call).
+
+So the tool is named `grep` and behaves like `rg`. Renaming it would only break the skills and
+prompts that refer to `grep`. Separately, `pi-rtk-optimizer` rewrites shell commands through
+`rtk rewrite`, which covers `grep` typed into `bash`.
+
+---
+
+## 🗂 Retired
+
+- `agent/prompts/plan.md` and `agent/skills/plan/` — moved to `_to_delete/` on the machine. The
+  prompt was a 7-line wrapper around the skill, and both were superseded by the decision to skip
+  `pi-plan` (see `OPTIMIZATIONS.md` §12). `_to_delete/` is gitignored; delete it yourself when
+  you are happy.
+
+---
+
 ## 🧩 Local Extensions
 
 Auto-discovered by pi from `agent/extensions/`:
@@ -231,6 +254,7 @@ Auto-discovered by pi from `agent/extensions/`:
 | Extension | What it does |
 |---|---|
 | `context.ts` | `/context` — colored grid of context usage by category, plus cache stats |
+| `plan-mode.ts` | `/plan` — read-only plan mode. Gates calls at `tool_call` instead of swapping the tool set, so nothing is lost on the way out. See below. |
 
 `web-fetch/` and `ask-user-question.ts` were removed once `pi-web-access` and `pi-ask-user` covered
 the same ground as maintained packages.
