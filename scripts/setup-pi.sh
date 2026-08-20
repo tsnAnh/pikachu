@@ -19,7 +19,7 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
 # ── Prerequisites ────────────────────────────────────────────────────
 bold "Checking prerequisites"
-for cmd in pi npm cargo; do
+for cmd in pi npm cargo python3 uv; do
   command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is required but not installed."
   ok "$cmd"
 done
@@ -118,6 +118,20 @@ for pkg_json in agent/extensions/*/package.json; do
   ok "$(basename "$dir")"
 done
 [ "$found" -eq 1 ] || ok "none to install"
+
+# ── Verified-plan service ────────────────────────────────────────────
+bold "Verified-plan service"
+uv sync --frozen --project "$REPO_ROOT/scripts/verifier" --quiet
+ok "Python environment synced"
+if [ -n "${OPENAI_BASE_URL:-}${DEEPSEEK_API_KEY:-}${VERTEX_API_KEY:-}" ]; then
+  if uv run --frozen --project "$REPO_ROOT/scripts/verifier" python "$REPO_ROOT/scripts/verifier/service.py" --check >/dev/null; then
+    ok "verifier model exposes score-token logprobs"
+  else
+    warn "verifier capability probe failed — /plan will present gate-passing plans unranked"
+  fi
+else
+  warn "verifier endpoint is not configured — /plan will present gate-passing plans unranked"
+fi
 
 # ── Pi packages ──────────────────────────────────────────────────────
 # `pi update --extensions` installs anything missing and updates the rest,

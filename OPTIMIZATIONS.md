@@ -552,3 +552,68 @@ Ordered by how much they save, not how easy they are.
 4. **§12** — `pi-web-access` (retires the local extension) and `pi-subagents` (the token lever)
 5. §4 model/thinking/compaction settings, then §5–§7 with `/rtk stats` and `pi config` as evidence
 6. §8 pinning + §10 import scope — hygiene, do them when touching those files anyway
+
+---
+
+## 16. ✅ APPLIED — verified multi-plan selection
+
+Verified against pi 0.84.2, `pi-subagents` 0.52.0, `pi-lens` 4.0.1, and
+`llm-verifier` 0.2.0 before implementation. §12 does not conflict: the existing `tool_call` gate
+remains the only plan-mode authority and the active tool set is never replaced.
+
+### Upstream findings and deliberate divergences
+
+- `llm_verifier.select(problem, candidates, *, criteria, n_evaluations=4, pivots=2, seed=0,
+  model=..., cache=..., on_error=...)` returns a winner, aggregate scores, and ranking. It returns
+  an unconditional score of `1.0` without a model call for one candidate, so Gate B implements the
+  approved two-orientation `compare()` against a fixed null-plan baseline instead.
+- `select()` writes raw directed criterion/repetition rows only to its JSON cache. The service gives
+  every selection an isolated cache, persists those rows in SQLite, derives criterion breakdowns,
+  and verifies that replaying the persisted rows reproduces the library ranking.
+- `compare()` is the public pairwise seam. Two-candidate ranking and top-two disagreement call it
+  in both orientations so prompt-slot bias cancels.
+- `ProgressTracker.update()` is the live turn-boundary seam; `track()` scores a persisted finished
+  trajectory offline. A restarted service rebuilds the live tracker from stored step text.
+- The library deliberately falls back from missing logprobs to parsing literal A–T text. That is
+  unsuitable here: `/healthz` calls the model directly and requires a real score-token alternative
+  distribution before the service is healthy.
+- Pi extensions receive `turn_end`; `session.subscribe()` belongs to the SDK. Extensions steer with
+  `pi.sendMessage(..., { deliverAs: "steer" })`, not `session.steer()`.
+- `appendEntry()` plus `registerEntryRenderer()` creates durable TUI state excluded from
+  `buildSessionContext()`. Scores use only that path. The selected plan is a score-free custom
+  message because custom messages do enter context.
+- `pi-subagents` exposes the supported structured delegation event API and a capability-ceiling
+  API, so no `pi -p` subprocess fallback is needed. A delegation request cannot provide a distinct
+  system prompt; dedicated `agent/agents/plan-stances/*.md` definitions replace the handoff's
+  proposed stance skills to satisfy the system-prompt diversity requirement.
+- `pi-lens` exposes cheap `moduleReport` and `readSymbol` functions through
+  `dist/clients/lens-engine.js`, its documented host-adapter seam. Gate A imports that seam in
+  process. Repository command validation reads manifests with Node's standard library; it never
+  invokes bash, so rtk cannot rewrite or compact gate evidence.
+
+### Verifier capability coverage
+
+| Capability | Result |
+|---|---|
+| Single-candidate scoring | Gate B and N=1 use two-orientation public `compare()` against the null plan. |
+| `select()` | N≥3 ranking with `on_error="raise"`; raw cache rows are returned and persisted. |
+| `compare()` | N=2 ranking and per-criterion top-two disagreement. |
+| `ProgressTracker` | Live execution scoring at Pi `turn_end`. |
+| `track()` | `/plan-review <session>` offline scoring. |
+| Logprob expectation | `/healthz` fails unless score-token top-logprobs are present. |
+| Letter scale A–T | Unchanged. |
+| `pivots` / `n_evaluations` | Settings dials, default 2 and 4. |
+| Criteria template | Versioned six-axis `agent/criteria/plan/v1.md` with pinned IDs. |
+| Score caching | SHA-256 includes normalized request, criteria version/content, model, normalizer, library version, pivots, evaluations, and seed. |
+| Multimodal | Excluded: plans and the configured verifier path are text-only. |
+| TurboAgent | Excluded: stance fan-out already supplies controlled diversity; best-of-N inside every planner call would multiply the same cost again. |
+
+The planner model is configurable, defaulting to `openai-codex/gpt-5.6-sol`. The verifier must
+serve the same underlying model ID through a direct logprob-capable endpoint. Pi's OAuth-backed
+`openai-codex` Responses route is not reusable by `llm-verifier`'s OpenAI-compatible Chat
+Completions client, so the default correctly stays degraded until such an endpoint is configured;
+there is no silent model substitution.
+
+Pi now starts the bundled verifier from its `session_start` lifecycle when `verifierUrl` is local,
+passing the configured planner's underlying model ID. Any existing listener is reused, remote URLs
+are untouched, and no OS daemon is installed.

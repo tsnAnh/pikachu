@@ -21,11 +21,12 @@ The setup script is idempotent — re-run it any time. It handles:
 2. **rtk** — token-reducing CLI proxy, via Homebrew
 3. **CodeMapper (`cm`)** — built from [source](https://github.com/p1rallels/codemapper) via Cargo
 4. **Local extension deps** — `npm install` inside each `agent/extensions/*/`
-5. **Pi packages** — `pi update --extensions`, which installs anything missing and updates the
+5. **Plan verifier** — syncs the pinned Python environment and probes configured score-token logprobs
+6. **Pi packages** — `pi update --extensions`, which installs anything missing and updates the
    rest straight from `agent/settings.json`
 
 > **Prerequisites:** [Homebrew](https://brew.sh), [Node.js](https://nodejs.org/),
-> [Rust](https://rustup.rs), and pi itself.
+> [Rust](https://rustup.rs), [Python](https://python.org/), [uv](https://docs.astral.sh/uv/), and pi itself.
 
 > **Already have a `~/.pi`?** `agent/settings.json` is tracked by this repo now. Back up your
 > existing one (`mv ~/.pi/agent/settings.json ~/.pi/agent/settings.json.bak`) before cloning, then
@@ -254,10 +255,53 @@ Auto-discovered by pi from `agent/extensions/`:
 | Extension | What it does |
 |---|---|
 | `context.ts` | `/context` — colored grid of context usage by category, plus cache stats |
-| `plan-mode.ts` | `/plan` — read-only plan mode. Gates calls at `tool_call` instead of swapping the tool set, so nothing is lost on the way out. See below. |
+| `plan-mode.ts` | `/plan [--n N] [task]` — read-only, multi-stance planning with repository gates, optional verifier ranking, and human selection. |
 
 `web-fetch/` and `ask-user-question.ts` were removed once `pi-web-access` and `pi-ask-user` covered
 the same ground as maintained packages.
+
+---
+
+## ✅ Verified planning
+
+`/plan` keeps the existing `tool_call` read-only gate and delegates planning to distinct stance
+agents. It always reports a suggested fan-out of 1, 3, or 5 from the task's visible complexity;
+`--n` overrides the number without hiding the suggestion.
+
+```text
+/plan Fix the parser in `src/parser.ts`
+/plan --n 5 Design the authentication migration
+/plan --n 3                # the next ordinary prompt becomes the task
+/plan-review <session-id>  # offline review of a tracked execution
+```
+
+Referenced paths, symbols, and repository commands are checked before scoring. The verifier then
+filters on groundedness, ranks the survivors across six criteria, shows the top-two disagreement,
+and asks the human to choose. It never auto-selects. Rankings and execution scores are custom
+session entries, so they are visible in the TUI but absent from model context; only the chosen plan
+is sent to the executor.
+
+The planner model is configurable at `planVerify.plannerModel`. The verifier must serve the same
+underlying model ID and expose real score-token logprobs—there is no model fallback. When
+`verifierUrl` is local, Pi starts the bundled verifier on launch and reuses an existing listener.
+Configure the direct OpenAI-compatible endpoint before starting Pi. The equivalent manual command
+for diagnostics is:
+
+```bash
+export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+export OPENAI_API_KEY=EMPTY
+export LLM_VERIFIER_MODEL=gpt-5.6-sol
+uv run --frozen --project scripts/verifier \
+  uvicorn service:app --app-dir scripts/verifier --host 127.0.0.1 --port 8899
+```
+
+`GET http://127.0.0.1:8899/healthz` returns HTTP 503 unless the probe observes a usable A–T
+logprob distribution. If the service is absent, refuses, dies mid-run, or reports a different
+model, Pi remains usable and presents every repository-gated plan unranked with a degraded label.
+Remote verifier URLs are never launched locally.
+
+`pi-caveman` can remove plan specificity and observational-memory compaction can discard evidence;
+the extension warns when either appears active. Candidate agents always start with fresh context.
 
 ---
 
@@ -270,10 +314,13 @@ the same ground as maintained packages.
 ├── web-search.json            # 🚫 never committed — pi-web-access provider keys
 ├── scripts/
 │   ├── setup-pi.sh            # bootstrap (idempotent)
+│   ├── verifier/               # FastAPI + SQLite llm-verifier service
 │   └── update-pi.sh           # update everything to latest
 └── agent/                     # pi's config dir (PI_CODING_AGENT_DIR)
     ├── settings.json          # ✅ tracked — the real config
     ├── AGENTS.md              # ✅ tracked — global instructions (optional)
+    ├── agents/                # ✅ tracked — read-only planning stances
+    ├── criteria/              # ✅ tracked — versioned verifier criteria
     ├── extensions/            # ✅ tracked — local extensions
     ├── skills/                # ✅ tracked — local skills
     ├── prompts/               # ✅ tracked — prompt templates

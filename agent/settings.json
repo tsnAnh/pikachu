@@ -3,6 +3,25 @@
   "defaultProvider": "opencode",
   "defaultModel": "deepseek-v4-flash-free",
   "defaultThinkingLevel": "high",
+  "planVerify": {
+    "n": 5,
+    "stances": [
+      "minimal",
+      "test-first",
+      "refactor-first",
+      "spike",
+      "do-nothing"
+    ],
+    "plannerModel": "openai-codex/gpt-5.6-sol",
+    "verifierUrl": "http://127.0.0.1:8899",
+    "criteria": "criteria/plan/v1.md",
+    "pivots": 2,
+    "nEvaluations": 4,
+    "gate": {
+      "symbolCheck": true,
+      "groundednessFloor": 0.4
+    }
+  },
   "packages": [
     {
       "source": "npm:pi-hooks",
