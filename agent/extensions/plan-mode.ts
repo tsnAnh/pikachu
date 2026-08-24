@@ -21,7 +21,6 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { installPlanVerifier } from "./plan-verify.ts";
 
 /**
  * Tools that only observe. Everything else is blocked in plan mode.
@@ -51,8 +50,8 @@ const READ_ONLY_TOOLS = new Set([
   "get_search_content",
   // pi-ask-user
   "ask_user",
-  // pi-subagents — the verifier fans out through its extension API under a
-  // read-only capability ceiling; model-initiated launches stay blocked.
+  // pi-subagents — delegated exploration is still exploration
+  "subagent",
   "subagent_wait",
   "structured_output",
 ]);
@@ -63,7 +62,6 @@ const BASH_WRITE_PATTERN =
 
 export default function planModeExtension(pi: ExtensionAPI): void {
   let planMode = false;
-  let verifier: ReturnType<typeof installPlanVerifier> | undefined;
 
   function render(ctx: ExtensionContext): void {
     ctx.ui.setStatus("plan-mode", planMode ? ctx.ui.theme.fg("warning", "⏸ plan") : undefined);
@@ -71,7 +69,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   function setMode(on: boolean, ctx: ExtensionContext): void {
     planMode = on;
-    if (!on) verifier?.cancelPending();
     render(ctx);
     ctx.ui.notify(
       on
@@ -81,25 +78,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     );
   }
 
-  verifier = installPlanVerifier(pi, {
-    setPlanMode: setMode,
-    isPlanMode: () => planMode,
-  });
-
   pi.registerCommand("plan", {
-    description: "Generate and verify read-only plans: /plan [--n 1..5] [task]",
-    handler: async (args, ctx) => {
-      if (planMode && !args.trim()) {
-        setMode(false, ctx);
-        return;
-      }
-      if (!planMode) setMode(true, ctx);
-      try {
-        await verifier?.handleCommand(args, ctx);
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-      }
-    },
+    description: "Toggle read-only plan mode (research and propose, no changes)",
+    handler: async (_args, ctx) => setMode(!planMode, ctx),
   });
 
   pi.registerCommand("plan:status", {

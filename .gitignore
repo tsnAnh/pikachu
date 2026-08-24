@@ -3,8 +3,6 @@
 agent/*
 !agent/settings.json
 !agent/AGENTS.md
-!agent/agents/
-!agent/criteria/
 !agent/extensions/
 !agent/skills/
 !agent/prompts/
@@ -43,9 +41,6 @@ agent/npm/
 # ── Extension build artifacts
 agent/extensions/**/node_modules/
 agent/extensions/**/*.lock
-scripts/verifier/.venv/
-scripts/verifier/__pycache__/
-scripts/verifier/*.sqlite3*
 
 # ── OS
 .DS_Store

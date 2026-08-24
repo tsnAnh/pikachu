@@ -21,12 +21,11 @@ The setup script is idempotent — re-run it any time. It handles:
 2. **rtk** — token-reducing CLI proxy, via Homebrew
 3. **CodeMapper (`cm`)** — built from [source](https://github.com/p1rallels/codemapper) via Cargo
 4. **Local extension deps** — `npm install` inside each `agent/extensions/*/`
-5. **Plan verifier** — syncs the pinned Python environment and probes configured score-token logprobs
-6. **Pi packages** — `pi update --extensions`, which installs anything missing and updates the
+5. **Pi packages** — `pi update --extensions`, which installs anything missing and updates the
    rest straight from `agent/settings.json`
 
 > **Prerequisites:** [Homebrew](https://brew.sh), [Node.js](https://nodejs.org/),
-> [Rust](https://rustup.rs), [Python](https://python.org/), [uv](https://docs.astral.sh/uv/), and pi itself.
+> [Rust](https://rustup.rs), and pi itself.
 
 > **Already have a `~/.pi`?** `agent/settings.json` is tracked by this repo now. Back up your
 > existing one (`mv ~/.pi/agent/settings.json ~/.pi/agent/settings.json.bak`) before cloning, then
@@ -51,9 +50,9 @@ pi setting belongs in this file, not just packages:
 ```json
 {
   "theme": "dark",
-  "defaultProvider": "opencode",
-  "defaultModel": "deepseek-v4-flash-free",
-  "defaultThinkingLevel": "high",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-v4-flash",
+  "defaultThinkingLevel": "off",
   "packages": [
     "npm:pi-hooks",
     "git:github.com/elpapi42/pi-fork"
@@ -88,6 +87,10 @@ Declared in [`agent/settings.json`](agent/settings.json).
 | **@dietrichgebert/ponytail** | "Lazy senior dev" skills: `/ponytail`, `-audit`, `-debt`, `-gain`, `-review`. |
 | **emilkowalski/skills** | Skills only, filtered to `apple-design` — Apple's fluid-motion and interface design principles translated to the web. |
 | **pi-fork** | Fork-based isolated subprocess execution. |
+| **@weshipwork/pi-herdr** | Herdr workspace, tab, and pane controls; loads as a no-op outside Herdr. |
+| **pi-mcp-adapter** | MCP server integration for Pi. |
+| **pi-goal** | Persistent `/goal` execution with pause and budget controls. |
+| **unlazy** | Acceptance-ledger and runnable-gate discipline for substantial agent work. |
 
 ### Context & tokens
 
@@ -126,43 +129,14 @@ and `readCompaction.enabled` is `false` here, so hash anchors are passed through
 repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
 Don't force-add it.
 
-**The default model still needs an OpenCode Zen API key.** `agent/settings.json` defaults to
-`opencode` / `deepseek-v4-flash-free` ($0 in and out). "Free" means no charges, not no auth —
-OpenCode's own docs say to sign in, add billing details and copy an API key, and that applies to the
-`-free` models too. The official `opencode` CLI hides this behind a one-time login, which is why it
-feels keyless. pi needs the key explicitly:
+**The default model uses DeepSeek directly.** `agent/settings.json` defaults to
+`deepseek/deepseek-v4-flash` with thinking off. Authenticate once in Pi:
 
 ```
-pi        # then: /login  →  OpenCode Zen
+pi        # then: /login  →  DeepSeek
 ```
 
-or export `OPENCODE_API_KEY`. Getting the key:
-
-1. Sign in at <https://opencode.ai/auth> and copy the API key from your account.
-   Billing details are only needed for the **paid** models — the `-free` ones work without a card.
-2. `pi` → `/login` → **OpenCode Zen** → paste. Stored in `agent/auth.json` at `0600` (gitignored).
-   Or `export OPENCODE_API_KEY=...` in your shell rc — `auth.json` takes priority over the env var.
-3. Nothing else to change; `defaultProvider`/`defaultModel` are already set.
-
-The key is the same one the `opencode` CLI uses, so if you have already connected Zen there, copy it
-from the account page rather than generating a second one.
-
-Note the free models are offered "for a limited time" while OpenCode collects feedback — this is not
-a stable long-term default.
-
-> **Known problem with this model.** Users report `deepseek-v4-flash-free` returning HTTP 429
-> *"Rate limit exceeded"* on **every** direct OpenAI-compatible API call — with a valid bearer
-> token, from multiple IPs — while the official OpenCode CLI works fine from the same network
-> ([opencode#42074](https://github.com/anomalyco/opencode/issues/42074)). The backend appears to
-> route TUI traffic differently from direct API clients. **pi is a direct API client**, so it falls
-> in the affected category. If every turn 429s, that is this, not your key.
->
-> Fallbacks: `opencode/deepseek-v4-flash` (paid, 1M context) or `openai-codex/gpt-5.6-sol`, which
-> already works with your existing OAuth token.
-
-Two more limits on the free model: its context window is **200k** (the paid `deepseek-v4-flash` is
-1M), and it is **text-only** — image attachments and `read` on an image will not work. Ctrl+P
-switches models mid-session.
+or export `DEEPSEEK_API_KEY`. The model is text-only; Ctrl+P can switch models mid-session.
 
 **`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
 would put 11 descriptions in every system prompt. The entry uses
@@ -255,53 +229,10 @@ Auto-discovered by pi from `agent/extensions/`:
 | Extension | What it does |
 |---|---|
 | `context.ts` | `/context` — colored grid of context usage by category, plus cache stats |
-| `plan-mode.ts` | `/plan [--n N] [task]` — read-only, multi-stance planning with repository gates, optional verifier ranking, and human selection. |
+| `plan-mode.ts` | `/plan` — read-only plan mode. Gates calls at `tool_call` instead of swapping the tool set, so nothing is lost on the way out. |
 
 `web-fetch/` and `ask-user-question.ts` were removed once `pi-web-access` and `pi-ask-user` covered
 the same ground as maintained packages.
-
----
-
-## ✅ Verified planning
-
-`/plan` keeps the existing `tool_call` read-only gate and delegates planning to distinct stance
-agents. It always reports a suggested fan-out of 1, 3, or 5 from the task's visible complexity;
-`--n` overrides the number without hiding the suggestion.
-
-```text
-/plan Fix the parser in `src/parser.ts`
-/plan --n 5 Design the authentication migration
-/plan --n 3                # the next ordinary prompt becomes the task
-/plan-review <session-id>  # offline review of a tracked execution
-```
-
-Referenced paths, symbols, and repository commands are checked before scoring. The verifier then
-filters on groundedness, ranks the survivors across six criteria, shows the top-two disagreement,
-and asks the human to choose. It never auto-selects. Rankings and execution scores are custom
-session entries, so they are visible in the TUI but absent from model context; only the chosen plan
-is sent to the executor.
-
-The planner model is configurable at `planVerify.plannerModel`. The verifier must serve the same
-underlying model ID and expose real score-token logprobs—there is no model fallback. When
-`verifierUrl` is local, Pi starts the bundled verifier on launch and reuses an existing listener.
-Configure the direct OpenAI-compatible endpoint before starting Pi. The equivalent manual command
-for diagnostics is:
-
-```bash
-export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
-export OPENAI_API_KEY=EMPTY
-export LLM_VERIFIER_MODEL=gpt-5.6-sol
-uv run --frozen --project scripts/verifier \
-  uvicorn service:app --app-dir scripts/verifier --host 127.0.0.1 --port 8899
-```
-
-`GET http://127.0.0.1:8899/healthz` returns HTTP 503 unless the probe observes a usable A–T
-logprob distribution. If the service is absent, refuses, dies mid-run, or reports a different
-model, Pi remains usable and presents every repository-gated plan unranked with a degraded label.
-Remote verifier URLs are never launched locally.
-
-`pi-caveman` can remove plan specificity and observational-memory compaction can discard evidence;
-the extension warns when either appears active. Candidate agents always start with fresh context.
 
 ---
 
@@ -314,13 +245,10 @@ the extension warns when either appears active. Candidate agents always start wi
 ├── web-search.json            # 🚫 never committed — pi-web-access provider keys
 ├── scripts/
 │   ├── setup-pi.sh            # bootstrap (idempotent)
-│   ├── verifier/               # FastAPI + SQLite llm-verifier service
 │   └── update-pi.sh           # update everything to latest
 └── agent/                     # pi's config dir (PI_CODING_AGENT_DIR)
     ├── settings.json          # ✅ tracked — the real config
     ├── AGENTS.md              # ✅ tracked — global instructions (optional)
-    ├── agents/                # ✅ tracked — read-only planning stances
-    ├── criteria/              # ✅ tracked — versioned verifier criteria
     ├── extensions/            # ✅ tracked — local extensions
     ├── skills/                # ✅ tracked — local skills
     ├── prompts/               # ✅ tracked — prompt templates
