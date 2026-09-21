@@ -58,10 +58,17 @@ test("ready todos require completed dependencies and use deterministic priority 
   );
 });
 
-test("tool shortlist may select multiple independent specialist groups", () => {
+test("tool shortlist keeps browser automation separate from web research", () => {
+  assert.deepEqual(shortlistGroups("Use browser automation to click and fill form controls"), ["browser"]);
   assert.deepEqual(shortlistGroups("Search the latest docs, then inspect LSP diagnostics"), ["web", "code"]);
   assert.deepEqual(shortlistGroups("Ask the user to choose an option"), []);
   assert.deepEqual(shortlistGroups("ordinary local edit"), []);
+});
+
+test("existing version-one state accepts the new browser group without invalidating older state", () => {
+  const state = initialState();
+  state.activeGroups = ["browser", "web"];
+  assert.deepEqual(state.activeGroups, ["browser", "web"]);
 });
 
 test("all routing tiers map to the configured Luna/Sol effort ladder", () => {

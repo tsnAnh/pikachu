@@ -34,5 +34,9 @@ agent/npm/
 agent/extensions/**/node_modules/
 agent/extensions/**/*.lock
 
+agent/extensions/**/.venv/
+agent/extensions/**/.upstream/
+agent/extensions/**/__pycache__/
+agent/extensions/**/*.pyc
 # ── OS
 .DS_Store

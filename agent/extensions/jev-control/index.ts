@@ -72,6 +72,7 @@ function formatTodo(todo: TodoItem): string {
 
 function toolGroup(name: string, source: string): SpecialistGroup | undefined {
   const value = `${name} ${source}`.toLowerCase();
+  if (name === "browser_use" || value.includes("jev-browser")) return "browser";
   if (value.includes("pi-web-access") || ["web_search", "fetch_content", "source_check", "get_search_content"].includes(name)) return "web";
   if (value.includes("pi-lens")) return "code";
   if (value.includes("pi-mcp-adapter") || name === "mcp" || name.startsWith("mcp_")) return "mcp";

@@ -18,7 +18,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$TARGET_AGENT" in ""|"/"|"$HOME"|"${HOME}/") die "Refusing unsafe target: ${TARGET_AGENT:-<empty>}" ;; esac
-for command in node npm rsync; do command -v "$command" >/dev/null 2>&1 || die "'$command' is required"; done
+for command in node npm rsync git python3 uv; do command -v "$command" >/dev/null 2>&1 || die "'$command' is required"; done
+python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' || die "Python 3.12 or newer is required"
 resolve_pi_bin() {
   if [ -n "${PI_CFG_REAL_PI:-}" ] && [ -x "$PI_CFG_REAL_PI" ]; then printf '%s\n' "$PI_CFG_REAL_PI"; return 0; fi
   local directory candidate old_ifs="$IFS"
@@ -141,9 +142,9 @@ sync_directory() {
   [ -d "$source" ] || return 0
   local destination="$TARGET_AGENT/$relative"
   if [ -d "$destination" ] &&
-    diff -qr --exclude node_modules --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
+    diff -qr --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
   backup_path "$relative"; mkdir -p "$destination"
-  rsync -a --delete --exclude node_modules --exclude .DS_Store "$source/" "$destination/" ||
+  rsync -a --delete --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store "$source/" "$destination/" ||
     die "Failed to sync $relative"
   ok "synced $relative"
 }
@@ -151,7 +152,7 @@ sync_directory() {
 if [ "$SOURCE_AGENT_REAL" != "$TARGET_AGENT" ]; then
   bold "Syncing repo-owned configuration"
   for file in settings.json models.json mcp.json jev.json zentui.json; do sync_file "$file"; done
-  for extension in context.ts plan-mode.ts delegation-mode.ts jev-control; do
+  for extension in context.ts plan-mode.ts delegation-mode.ts jev-control jev-browser; do
     if [ -d "$SOURCE_AGENT/extensions/$extension" ]; then sync_directory "extensions/$extension"
     else sync_file "extensions/$extension"; fi
   done
@@ -169,6 +170,38 @@ for pkg in "$TARGET_AGENT"/extensions/*/package.json; do
   [ -e "$pkg" ] || continue; dir="$(dirname "$pkg")"
   (cd "$dir" && npm ci --omit=dev --no-audit --no-fund --silent); ok "$(basename "$dir")"
 done
+
+bold "Installing complete Jev Ultrafast checkout"
+JEV_BROWSER_DIR="$TARGET_AGENT/extensions/jev-browser"
+JEV_ULTRAFAST_REF="1231850a0bf1a0c0341fe408ef1668dbbfdfac46"
+JEV_ULTRAFAST_DIR="$JEV_BROWSER_DIR/.upstream"
+JEV_BROWSER_PYTHON="$JEV_ULTRAFAST_DIR/.venv/bin/python"
+if [ -d "$JEV_BROWSER_DIR/.venv" ]; then rm -rf "$JEV_BROWSER_DIR/.venv"; ok "retired package-only Jev runtime"; fi
+if [ ! -d "$JEV_ULTRAFAST_DIR/.git" ]; then
+  rm -rf "$JEV_ULTRAFAST_DIR"
+  git clone --no-checkout --filter=blob:none https://github.com/browser-use/jev-ultrafast.git "$JEV_ULTRAFAST_DIR" >/dev/null 2>&1 ||
+    die "Failed to clone Jev Ultrafast"
+fi
+git -C "$JEV_ULTRAFAST_DIR" fetch --depth 1 origin "$JEV_ULTRAFAST_REF" >/dev/null 2>&1 ||
+  die "Failed to fetch pinned Jev Ultrafast commit"
+git -C "$JEV_ULTRAFAST_DIR" checkout --detach --force "$JEV_ULTRAFAST_REF" >/dev/null 2>&1 ||
+  die "Failed to check out pinned Jev Ultrafast commit"
+git -C "$JEV_ULTRAFAST_DIR" clean -fd >/dev/null 2>&1 || die "Failed to clean Jev Ultrafast checkout"
+[ "$(git -C "$JEV_ULTRAFAST_DIR" rev-parse HEAD)" = "$JEV_ULTRAFAST_REF" ] || die "Jev Ultrafast checkout verification failed"
+git -C "$JEV_ULTRAFAST_DIR" apply "$JEV_BROWSER_DIR/patches/navigation-settle.patch" ||
+  die "Failed to apply Jev Ultrafast navigation-settle patch"
+uv sync --frozen --no-dev --project "$JEV_ULTRAFAST_DIR" --quiet
+"$JEV_BROWSER_PYTHON" -c 'import jev_ultrafast; import browser_harness' || die "Jev browser runtime import check failed"
+ok "complete jev-ultrafast checkout @ $JEV_ULTRAFAST_REF"
+if ! "$JEV_BROWSER_PYTHON" -c 'from browser_harness.admin import ensure_daemon; ensure_daemon()' >/dev/null 2>&1; then
+  if [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ]; then
+    warn "Browser Harness is installed but Chrome remote debugging is unavailable; browser_use will remain unavailable until Chrome is configured"
+  else
+    die "Browser Harness could not connect to Chrome; enable chrome://inspect/#remote-debugging, then run '$JEV_ULTRAFAST_DIR/.venv/bin/browser-harness --doctor'"
+  fi
+else
+  ok "Browser Harness can connect to Chrome"
+fi
 
 bold "Materializing exact npm package set"
 mkdir -p "$TARGET_AGENT/npm"

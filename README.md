@@ -19,7 +19,8 @@ agent**, **subagent orchestration**, or **automatic Pi updater**.
 | Editing | `pi-hashline-edit-pro@4.3.5` for hash-anchored changes |
 | Delegation | `pi-subagents@0.70.0` and `@weshipwork/pi-herdr@0.1.0` |
 | Review | pi-subagents' maintained parallel-review workflow |
-| Web access | `pi-web-access@0.30.0`, activated only when needed |
+| Web research | `pi-web-access@0.30.0`, activated only when needed |
+| Browser automation | Pinned `browser-use/jev-ultrafast` with TypeSafe decisions and Sol-low field text |
 | User questions | `pi-ask-user@0.15.0`, active from session start |
 | MCP integration | `pi-mcp-adapter@2.34.0` with lazy Trello and RevenueCat servers |
 | Terminal UI | `pi-zentui@0.25.0` as the persistent footer and UI owner |
@@ -78,8 +79,9 @@ the current model. TitoX remains available for manual selection.
 ### Lazy specialist tools
 
 Core file and shell tools, hashline editing, todos, safety tooling, `ask_user`, and the selected
-delegation tool start active. Web access, pi-lens tools, and MCP tools start hidden to keep the
-model's tool surface small.
+delegation tool start active. Web research, browser automation, pi-lens tools, and MCP tools start
+hidden to keep the model's tool surface small. Browser automation is a separate specialist group,
+so activating it does not expose web-search and fetch tools.
 
 ```text
 jev_find_tools({ query: "search current documentation and inspect symbol references" })
@@ -91,6 +93,41 @@ Tool activation is additive for the session. Jev validates deterministic local m
 TypeSafe key is available; otherwise keyword matching provides the fallback. Delegation tools are
 managed separately and are never changed by the specialist router.
 
+
+### Jev Ultrafast browser automation
+
+`browser_use` operates interactive pages through a complete checkout of
+[`browser-use/jev-ultrafast`](https://github.com/browser-use/jev-ultrafast), pinned to commit
+`1231850a0bf1a0c0341fe408ef1668dbbfdfac46`. The deployed checkout retains the upstream CLI,
+inspector, examples, tests, snapshot implementation, recording utilities, documentation, and frozen
+`uv.lock`; the Pi tool invokes that checkout's `Agent` directly. Use it for clicking, typing,
+selecting, scrolling, and navigation.
+Continue to use `web_search`, `fetch_content`, `source_check`, and
+`get_search_content` for research and retrieval.
+
+Jev sends the visible indexed action space to TypeSafe using the existing environment-only
+`TYPESAFE_API_KEY`. When a field needs text, the local Pi extension calls exactly
+`openai-codex/gpt-5.6-sol` at low reasoning through Pi's configured provider authentication.
+The Pi adapter requires the persistent Browser Harness daemon started during setup; it never
+auto-starts a replacement daemon during a tool call, preventing repeated macOS approval prompts.
+Mercury, OpenRouter, and a separate `TEXT_MODEL_API_KEY` are not used. Provider credentials remain
+inside Pi and are never passed to the Python browser process.
+
+Chrome must be running with remote debugging enabled at `chrome://inspect/#remote-debugging`.
+Diagnose the connection with:
+
+```bash
+~/.pi/agent/extensions/jev-browser/.upstream/.venv/bin/browser-harness --doctor
+```
+
+Browser actions can create real external side effects. Give the tool one narrow goal with a visibly
+verifiable outcome and obtain explicit confirmation before consequential actions. A Jev `DONE`
+decision is not independent proof of success. The pinned upstream MVP supports indexed common HTML
+and ARIA controls; frames, canvas, uploads, pop-up tabs, nested scrolling, and unusual keyboard
+widgets remain unsupported.
+The tracked `navigation-settle.patch` adds a generic post-link wait for URL, title, and document readiness
+so dynamic listings do not snapshot the previous page after navigation. It contains no site-specific
+selectors or article names.
 ### Interactive plan mode
 
 ```text
@@ -152,6 +189,9 @@ Requirements:
 - Node.js 22.19 or newer
 - npm
 - rsync
+- Python 3.12 or newer
+- `uv`
+- Chrome with remote debugging enabled for browser automation
 
 Clone the repository and deploy the configuration:
 
@@ -245,7 +285,8 @@ agent/
     ├── context.ts                # /context
     ├── plan-mode.ts              # /plan workflow and approval panel
     ├── delegation-mode.ts        # /delegate and /review
-    └── jev-control/              # Routing, lazy tools, and session todos
+    ├── jev-control/              # Routing, lazy tools, and session todos
+    └── jev-browser/              # Jev Ultrafast tool and Sol-low text bridge
 scripts/
 ├── setup-pi.sh                   # Validate, back up, and deploy config
 ├── update-pi.sh                  # Update Pi/models and report package drift

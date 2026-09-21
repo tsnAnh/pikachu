@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PLAN_READY_MARKER, extractCompletedPlan, isReadOnlyBash } from "../src/plan-mode-core.js";
+import { PLAN_READY_MARKER, extractCompletedPlan, isReadOnlyBash, movePlanReviewScroll } from "../src/plan-mode-core.js";
 
 test("completed plans require and remove the readiness marker", () => {
   assert.equal(extractCompletedPlan("# Plan\n\nDo the work."), undefined);
@@ -30,4 +30,12 @@ test("plan shell policy blocks direct and disguised mutation", () => {
     "npm install package",
   ];
   for (const command of blocked) assert.equal(isReadOnlyBash(command), false, command);
+});
+
+test("plan review scrolling is bounded at both ends", () => {
+  assert.equal(movePlanReviewScroll(10, -3, 40), 7);
+  assert.equal(movePlanReviewScroll(10, 8, 40), 18);
+  assert.equal(movePlanReviewScroll(2, -20, 40), 0);
+  assert.equal(movePlanReviewScroll(35, 20, 40), 40);
+  assert.equal(movePlanReviewScroll(Number.MAX_SAFE_INTEGER, 0, 40), 40);
 });

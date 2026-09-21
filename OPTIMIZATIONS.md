@@ -17,6 +17,8 @@ The resulting rule is one owner per concern:
 | Editing | pi-hashline-edit-pro |
 | Delegation | Herdr or pi-subagents, selected per session |
 | Review | pi-subagents' maintained parallel-review prompt |
+| Web research | pi-web-access |
+| Browser automation | Complete pinned Jev Ultrafast checkout plus a narrow Pi/Sol-low adapter |
 | Safety | cc-safety-net standard policy |
 | Context inspection | Local `/context` command |
 
@@ -49,6 +51,13 @@ OMP itself and the unrelated open-catalog `oh-my-pi` skill are not installed.
 
 - Every npm package is pinned to an exact version and the external design skill to a commit SHA.
 - `TYPESAFE_API_KEY` is environment-only.
+- Jev Ultrafast is deployed as a complete checkout pinned to Git commit
+  `1231850a0bf1a0c0341fe408ef1668dbbfdfac46`; `uv sync --frozen` honors upstream's lockfile, and
+  the generated checkout and virtual environment remain ignored.
+- A tracked generic navigation-settle patch waits for a changed URL/title and a ready document after
+  link clicks; setup reapplies it deterministically to the pinned checkout.
+- Browser operation/target choices receive only the TypeSafe key. Field text uses Pi's configured
+  `openai-codex/gpt-5.6-sol` provider at low reasoning without exporting provider credentials.
 - Jev calls use bounded timeouts, no retries, and deterministic fallbacks.
 - Plain custom session entries hold todo/routing/tool/delegation state and are not sent to the LLM.
 - Deployment copies only repo-owned files, backs up replacements, and preserves unknown live data.

@@ -19,7 +19,7 @@ export interface ControlState {
   activeGroups: SpecialistGroup[];
 }
 
-export type SpecialistGroup = "web" | "code" | "mcp";
+export type SpecialistGroup = "browser" | "web" | "code" | "mcp";
 export type RouteTier = "easy" | "routine" | "demanding" | "hard";
 
 export function isJevDisabled(value: string | undefined): boolean {
@@ -34,9 +34,13 @@ export function routeTarget(tier: RouteTier): { id: string; thinking: "low" | "m
 }
 
 export const SPECIALIST_GROUPS: Record<SpecialistGroup, { label: string; keywords: string[] }> = {
+  browser: {
+    label: "interactive browser automation",
+    keywords: ["browser automation", "browser use", "interact", "click", "fill form", "navigate", "operate website"],
+  },
   web: {
     label: "web research and URL retrieval",
-    keywords: ["web", "internet", "online", "search", "url", "website", "latest", "news", "source"],
+    keywords: ["web", "internet", "online", "search", "url", "latest", "news", "source"],
   },
   code: {
     label: "LSP, diagnostics, symbols, AST and structural code analysis",

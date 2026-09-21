@@ -80,3 +80,8 @@ export function extractCompletedPlan(text: string): string | undefined {
   const plan = text.replaceAll(PLAN_READY_MARKER, "").trim();
   return plan || undefined;
 }
+
+/** Keep plan-review scrolling inside the currently rendered document. */
+export function movePlanReviewScroll(current: number, delta: number, maxScroll: number): number {
+  return Math.max(0, Math.min(maxScroll, current + delta));
+}

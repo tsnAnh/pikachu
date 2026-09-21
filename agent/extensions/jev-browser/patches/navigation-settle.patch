@@ -1,0 +1,39 @@
+diff --git a/jev_ultrafast/browser.py b/jev_ultrafast/browser.py
+index 42006ec..d97db4a 100644
+--- a/jev_ultrafast/browser.py
++++ b/jev_ultrafast/browser.py
+@@ -21,5 +21,6 @@ class Browser:
+     def __init__(self, url):
+         ensure_daemon()
++        self.pending_navigation = None
+         self.target = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
+         self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
+         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
+@@ -47,2 +48,21 @@ class Browser:
+     def observe(self, screenshot=True):
++        if self.pending_navigation:
++            old_url, old_title = self.pending_navigation
++            deadline = time.monotonic() + 2
++            while time.monotonic() < deadline:
++                try:
++                    current = self.evaluate(
++                        "({url:location.href,title:document.title,ready:document.readyState})"
++                    )
++                except (RuntimeError, StalePage):
++                    current = None
++                if (
++                    current
++                    and current["url"] != old_url
++                    and current["title"] != old_title
++                    and current["ready"] == "complete"
++                ):
++                    break
++                time.sleep(0.05)
++            self.pending_navigation = None
+         if getattr(self, "after_input", None):
+@@ -98,3 +114,5 @@ class Browser:
+         result = browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
+         self.after_input = action if action["kind"] != "wait" else None
++        if action["kind"] == "click" and action.get("role") == "link":
++            self.pending_navigation = (page["url"], page["title"])
+         return result

@@ -10,10 +10,24 @@ import {
   getMarkdownTheme,
   type ExtensionAPI,
   type ExtensionContext,
+  type KeybindingsManager,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Markdown, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { PLAN_READY_MARKER, extractCompletedPlan, isReadOnlyBash } from "./jev-control/src/plan-mode-core.js";
+import {
+  Markdown,
+  matchesKey,
+  truncateToWidth,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
+import {
+  PLAN_READY_MARKER,
+  extractCompletedPlan,
+  isReadOnlyBash,
+  movePlanReviewScroll,
+} from "./jev-control/src/plan-mode-core.js";
 
 const STATE_ENTRY = "pi-cfg-plan-mode-v1";
 
@@ -85,6 +99,8 @@ class PlanReviewPanel {
   focused = false;
   private selected = 0;
   private scroll = 0;
+  private maxScroll = 0;
+  private pageSize = 4;
 
   private readonly actions: Array<{ decision: PlanDecision; label: string }> = [
     { decision: "implement", label: "1. Yes, implement the plan" },
@@ -96,21 +112,46 @@ class PlanReviewPanel {
     private readonly plan: string,
     private readonly theme: Theme,
     private readonly height: number,
+    private readonly keybindings: KeybindingsManager,
+    private readonly requestRender: () => void,
     private readonly done: (decision: PlanDecision) => void,
   ) {}
+
+  private scrollBy(delta: number): void {
+    const next = movePlanReviewScroll(this.scroll, delta, this.maxScroll);
+    if (next === this.scroll) return;
+    this.scroll = next;
+    this.requestRender();
+  }
+
+  private selectBy(delta: number): void {
+    const count = this.actions.length;
+    this.selected = (this.selected + delta + count) % count;
+    this.requestRender();
+  }
 
   handleInput(data: string): void {
     if (data === "1") return this.done("implement");
     if (data === "2") return this.done("clear-implement");
-    if (data === "3" || matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) return this.done("stay");
-    if (matchesKey(data, "return")) return this.done(this.actions[this.selected]!.decision);
-    if (matchesKey(data, "up")) this.selected = Math.max(0, this.selected - 1);
-    else if (matchesKey(data, "down")) this.selected = Math.min(this.actions.length - 1, this.selected + 1);
-    else if (matchesKey(data, "tab")) this.selected = (this.selected + 1) % this.actions.length;
-    else if (matchesKey(data, "pageUp")) this.scroll = Math.max(0, this.scroll - Math.max(4, this.height - 12));
-    else if (matchesKey(data, "pageDown")) this.scroll += Math.max(4, this.height - 12);
-    else if (matchesKey(data, "home")) this.scroll = 0;
-    else if (matchesKey(data, "end")) this.scroll = Number.MAX_SAFE_INTEGER;
+    if (data === "3" || this.keybindings.matches(data, "tui.select.cancel")) return this.done("stay");
+    if (this.keybindings.matches(data, "tui.select.confirm")) return this.done(this.actions[this.selected]!.decision);
+
+    if (this.keybindings.matches(data, "tui.select.up")) this.selectBy(-1);
+    else if (this.keybindings.matches(data, "tui.select.down")) this.selectBy(1);
+    else if (data === "k") this.scrollBy(-1);
+    else if (data === "j") this.scrollBy(1);
+    else if (this.keybindings.matches(data, "tui.select.pageUp") || matchesKey(data, "ctrl+u")) this.scrollBy(-this.pageSize);
+    else if (this.keybindings.matches(data, "tui.select.pageDown") || matchesKey(data, "ctrl+d")) this.scrollBy(this.pageSize);
+    else if (matchesKey(data, "home") || data === "g") this.scrollBy(-this.maxScroll);
+    else if (matchesKey(data, "end") || data === "G") this.scrollBy(this.maxScroll);
+    else if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) this.selectBy(-1);
+    else if (this.keybindings.matches(data, "tui.input.tab") || matchesKey(data, "right")) this.selectBy(1);
+  }
+
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type !== "wheel" || !event.wheelDelta) return undefined;
+    this.scrollBy(event.wheelDelta);
+    return { handled: true, render: true, focus: true };
   }
 
   render(width: number): string[] {
@@ -121,8 +162,9 @@ class PlanReviewPanel {
     );
     const bodyHeight = Math.max(1, this.height - actionRows.length - 8);
     const renderedPlan = new Markdown(this.plan, 1, 0, getMarkdownTheme()).render(innerWidth);
-    const maxScroll = Math.max(0, renderedPlan.length - bodyHeight);
-    this.scroll = Math.min(this.scroll, maxScroll);
+    this.pageSize = Math.max(4, bodyHeight - 1);
+    this.maxScroll = Math.max(0, renderedPlan.length - bodyHeight);
+    this.scroll = movePlanReviewScroll(this.scroll, 0, this.maxScroll);
 
     const pad = (text: string): string => text + " ".repeat(Math.max(0, innerWidth - visibleWidth(text)));
     const row = (text = ""): string =>
@@ -146,7 +188,7 @@ class PlanReviewPanel {
       const label = selected ? this.theme.fg("accent", this.theme.bold(actionRow.text)) : actionRow.text;
       lines.push(row(prefix + label));
     }
-    lines.push(row(this.theme.fg("dim", " ↑↓ choose · PgUp/PgDn scroll · 1/2/3 shortcut · Enter confirm · Esc stay")));
+    lines.push(row(this.theme.fg("dim", " ↑↓/Tab choose · j/k or wheel scroll · PgUp/PgDn page · Enter confirm")));
     lines.push(border("╰", "─", "╯"));
     return lines;
   }
@@ -204,9 +246,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     const decision = await ctx.ui.custom<PlanDecision>(
-      (tui, theme, _keybindings, done) => {
+      (tui, theme, keybindings, done) => {
         const height = Math.max(12, Math.min(36, tui.terminal.rows - 4));
-        return new PlanReviewPanel(plan, theme, height, done);
+        return new PlanReviewPanel(plan, theme, height, keybindings, () => tui.requestRender(), done);
       },
       { overlay: true, overlayOptions: { width: "92%", maxHeight: "90%", anchor: "center", margin: 1 } },
     );
