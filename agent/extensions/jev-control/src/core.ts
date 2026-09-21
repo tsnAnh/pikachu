@@ -22,6 +22,10 @@ export interface ControlState {
 export type SpecialistGroup = "web" | "code" | "mcp";
 export type RouteTier = "easy" | "routine" | "demanding" | "hard";
 
+export function isJevDisabled(value: string | undefined): boolean {
+  return /^(1|true|yes)$/i.test(value?.trim() ?? "");
+}
+
 export function routeTarget(tier: RouteTier): { id: string; thinking: "low" | "medium" | "high" } {
   if (tier === "easy") return { id: "gpt-5.6-luna", thinking: "low" };
   if (tier === "routine") return { id: "gpt-5.6-sol", thinking: "low" };

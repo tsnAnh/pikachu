@@ -11,6 +11,7 @@ import {
   incompleteDependencies,
   initialState,
   isControlState,
+  isJevDisabled,
   isSpecialistGroup,
   normalizePriority,
   readyTodos,
@@ -49,6 +50,7 @@ interface TodoAdvisory {
 }
 
 function getClient(): TypeSafeClient | undefined {
+  if (isJevDisabled(process.env.JEVC_DISABLED)) return undefined;
   const apiKey = process.env.TYPESAFE_API_KEY?.trim();
   if (!apiKey) return undefined;
   try {

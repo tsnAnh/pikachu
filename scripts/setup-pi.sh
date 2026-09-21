@@ -38,7 +38,7 @@ NODE_VERSION="$(node --version | sed 's/^v//')"
 node -e 'const [a,b]=process.versions.node.split(".").map(Number);if(a<22||(a===22&&b<19))process.exit(1)' ||
   die "node $NODE_VERSION is too old; Node >=22.19 is required"
 
-bold "Configuring TypeSafe"
+bold "Optional Jev"
 KEYCHAIN_SERVICE="pikachu.typesafe-api-key"
 KEYCHAIN_ACCOUNT="${USER:-$(id -un)}"
 if [ -n "${TYPESAFE_API_KEY:-}" ]; then
@@ -50,22 +50,32 @@ elif command -v security >/dev/null 2>&1 &&
   unset STORED_TYPESAFE_KEY
   ok "TYPESAFE_API_KEY loaded from macOS Keychain"
 elif [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ] || [ ! -t 0 ]; then
-  warn "TYPESAFE_API_KEY is not configured; Jev will use deterministic and native Pi fallbacks"
+  warn "Jev is not configured; Pi will use the active coding model for native compaction"
 elif command -v security >/dev/null 2>&1; then
-  printf '    Enter TYPESAFE_API_KEY (hidden, Enter to skip): '
-  IFS= read -r -s TYPESAFE_KEY_INPUT
-  printf '\n'
-  if [ -n "$TYPESAFE_KEY_INPUT" ]; then
-    security add-generic-password -a "$KEYCHAIN_ACCOUNT" -s "$KEYCHAIN_SERVICE" -w "$TYPESAFE_KEY_INPUT" -U >/dev/null ||
-      die "Failed to save TYPESAFE_API_KEY in macOS Keychain"
-    export TYPESAFE_API_KEY="$TYPESAFE_KEY_INPUT"
-    unset TYPESAFE_KEY_INPUT
-    ok "TYPESAFE_API_KEY saved in macOS Keychain"
-  else
-    warn "Skipped; Jev will use deterministic and native Pi fallbacks"
-  fi
+  printf '    Enable optional Jev decisions and compaction? [y/N]: '
+  IFS= read -r ENABLE_JEV
+  case "$ENABLE_JEV" in
+    y|Y|yes|YES|Yes)
+      printf '    Enter TYPESAFE_API_KEY (hidden, Enter to cancel): '
+      IFS= read -r -s TYPESAFE_KEY_INPUT
+      printf '\n'
+      if [ -n "$TYPESAFE_KEY_INPUT" ]; then
+        security add-generic-password -a "$KEYCHAIN_ACCOUNT" -s "$KEYCHAIN_SERVICE" -w "$TYPESAFE_KEY_INPUT" -U >/dev/null ||
+          die "Failed to save TYPESAFE_API_KEY in macOS Keychain"
+        export TYPESAFE_API_KEY="$TYPESAFE_KEY_INPUT"
+        unset TYPESAFE_KEY_INPUT
+        ok "TYPESAFE_API_KEY saved in macOS Keychain"
+      else
+        warn "Jev setup cancelled; Pi will use the active coding model for native compaction"
+      fi
+      ;;
+    *)
+      ok "Jev skipped; Pi will use the active coding model for native compaction"
+      ;;
+  esac
+  unset ENABLE_JEV
 else
-  warn "Set TYPESAFE_API_KEY in the environment before setup; no supported secure credential store was found"
+  warn "Jev is optional and no supported secure credential store was found; using Pi's active coding model"
 fi
 
 bold "Validating repository configuration"

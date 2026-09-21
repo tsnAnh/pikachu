@@ -38,12 +38,13 @@ picker includes OpenAI Codex models plus the keyless `titox/deepseek-v4-flash` d
 
 ## Workflow features
 
-### Jev compaction
+### Optional Jev compaction
 
 Jev keeps high-value messages verbatim instead of replacing the conversation with a generated
 summary. It uses a 50% keep threshold and requires at least 15% estimated reduction. Missing
-credentials, authentication failures, timeouts, cancellation, and inadequate reduction fall back
-to Pi's native compaction.
+credentials, opting out during setup, authentication failures, timeouts, cancellation, and
+inadequate reduction fall back to native Pi compaction using the active coding-agent model. Pi
+remains fully usable without Jev.
 
 ```text
 /compact
@@ -160,11 +161,12 @@ cd pikachu
 scripts/setup-pi.sh
 ```
 
-If `TYPESAFE_API_KEY` is not already available, interactive setup asks for it using a hidden
-prompt. On macOS, a non-empty value is stored in Keychain under `pikachu.typesafe-api-key`; the
-preflight launcher reads it into Pi's environment at startup. The key is never written to this
-repository, Pi configuration, logs, or session files. Press Enter to skip it and retain the normal
-fallback behavior.
+Jev is optional. If `TYPESAFE_API_KEY` is not already available, interactive setup first asks
+whether to enable Jev. Only an affirmative answer opens the hidden key prompt. On macOS, a
+non-empty value is stored in Keychain under `pikachu.typesafe-api-key`; the preflight launcher
+reads it into Pi's environment at startup. The key is never written to this repository, Pi
+configuration, logs, or session files. Declining or cancelling uses the active coding-agent model
+for native Pi compaction.
 
 You can also provide the key from your shell or another secret manager before setup:
 
@@ -173,7 +175,13 @@ export TYPESAFE_API_KEY="..."
 ```
 
 Without the key, Pi still starts normally. Jev-dependent decisions use deterministic or native Pi
-fallbacks.
+fallbacks, while compaction uses the active coding-agent model.
+
+To disable Jev for one launch even when a key is configured:
+
+```bash
+JEVC_DISABLED=1 pi
+```
 
 To remove the macOS Keychain entry:
 

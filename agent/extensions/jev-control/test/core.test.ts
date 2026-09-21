@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertDependencies,
   initialState,
+  isJevDisabled,
   readyTodos,
   routeTarget,
   shortlistGroups,
@@ -26,6 +27,14 @@ test("initial state enables routing without specialist groups", () => {
     routeMode: "auto",
     activeGroups: [],
   });
+});
+
+test("Jev can be disabled explicitly for the whole configuration", () => {
+  assert.equal(isJevDisabled("1"), true);
+  assert.equal(isJevDisabled("true"), true);
+  assert.equal(isJevDisabled("YES"), true);
+  assert.equal(isJevDisabled("0"), false);
+  assert.equal(isJevDisabled(undefined), false);
 });
 
 test("dependencies reject missing IDs, self references and cycles", () => {
