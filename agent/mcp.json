@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "trello": {
+      "url": "https://mcp.trello.com/v1",
+      "auth": "oauth",
+      "lifecycle": "lazy"
+    },
+    "revenuecat": {
+      "url": "https://mcp.revenuecat.ai/mcp",
+      "auth": "oauth",
+      "lifecycle": "lazy"
+    }
+  }
+}

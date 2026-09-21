@@ -2,6 +2,10 @@
 #    handful of files that are actually configuration worth version-controlling.
 agent/*
 !agent/settings.json
+!agent/mcp.json
+!agent/jev.json
+!agent/models.json
+!agent/zentui.json
 !agent/AGENTS.md
 !agent/extensions/
 !agent/skills/
@@ -12,25 +16,13 @@ agent/*
 #    someone loosens the negations above.
 agent/auth.json
 agent/trust.json
-agent/models.json
+# Provider definitions are safe to track; credentials remain in auth.json.
 agent/models-store.json
 agent/sessions/
 agent/git/
 agent/npm/
 
-# ── pi-web-access writes its config to $PI_CODING_AGENT_DIR/web-search.json
-
-# ── Staging area for files removed on a machine where deletes are blocked.
-#    Safe to remove by hand once you have checked the contents.
-/_to_delete/
-/_backup-precfg/, and
-#    falls back to ~/.pi/web-search.json
-
-# ── Staging area for files removed on a machine where deletes are blocked.
-#    Safe to remove by hand once you have checked the contents.
-/_to_delete/
-/_backup-precfg/ when that env var is unset — i.e. the
-#    root of THIS repo. It holds plaintext provider API keys. Never commit it.
+# ── pi-web-access may place plaintext provider keys in the repo root.
 /web-search.json
 
 # ── Staging area for files removed on a machine where deletes are blocked.

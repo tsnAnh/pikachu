@@ -1,0 +1,25 @@
+{
+  "components": {
+    "editor": {
+      "enabled": true,
+      "style": "opencode"
+    },
+    "userMessages": {
+      "enabled": true,
+      "style": "framed"
+    },
+    "thinkingSteps": {
+      "enabled": false
+    },
+    "workingLine": {
+      "enabled": false
+    },
+    "selectorBorders": {
+      "enabled": true,
+      "style": "zentui"
+    },
+    "footer": {
+      "style": "starship"
+    }
+  }
+}

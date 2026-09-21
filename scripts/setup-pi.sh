@@ -1,131 +1,165 @@
 #!/usr/bin/env bash
-#
-# Bootstrap the pi environment described by agent/settings.json.
-# Safe to re-run — every step is idempotent. Pass --force to rebuild cm/rtk.
-#
+# Validate this repository and deploy its allowlisted Pi configuration.
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
-REPO_ROOT="$(pwd)"
-SETTINGS="$REPO_ROOT/agent/settings.json"
-FORCE="${1:-}"
-
+REPO_ROOT="$(pwd -P)"
+SOURCE_AGENT="$REPO_ROOT/agent"
+TARGET_AGENT="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 bold() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
-ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
-warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
-die()  { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+ok() { printf '    \033[32m✓\033[0m %s\n' "$1"; }
+die() { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
-[ -f "$SETTINGS" ] || die "Missing $SETTINGS"
-
-# ── Prerequisites ────────────────────────────────────────────────────
-bold "Checking prerequisites"
-for cmd in pi npm cargo; do
-  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is required but not installed."
-  ok "$cmd"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) [ "$#" -ge 2 ] || die "--target requires a directory"; TARGET_AGENT="$2"; shift 2 ;;
+    -h|--help) printf 'Usage: %s [--target <agent-dir>]\n' "$0"; exit 0 ;;
+    *) die "Unknown argument: $1" ;;
+  esac
 done
-if command -v brew >/dev/null 2>&1; then ok "brew"; else warn "Homebrew not found — rtk install will be skipped."; fi
+case "$TARGET_AGENT" in ""|"/"|"$HOME"|"${HOME}/") die "Refusing unsafe target: ${TARGET_AGENT:-<empty>}" ;; esac
+for command in node npm rsync; do command -v "$command" >/dev/null 2>&1 || die "'$command' is required"; done
+resolve_pi_bin() {
+  if [ -n "${PI_CFG_REAL_PI:-}" ] && [ -x "$PI_CFG_REAL_PI" ]; then printf '%s\n' "$PI_CFG_REAL_PI"; return 0; fi
+  local directory candidate old_ifs="$IFS"
+  IFS=:
+  for directory in $PATH; do
+    [ -n "$directory" ] || directory="."
+    candidate="$directory/pi"
+    [ -x "$candidate" ] || continue
+    if [ -e "$REPO_ROOT/scripts/pi-launcher.sh" ] && [ "$candidate" -ef "$REPO_ROOT/scripts/pi-launcher.sh" ]; then continue; fi
+    IFS="$old_ifs"; printf '%s\n' "$candidate"; return 0
+  done
+  IFS="$old_ifs"; return 1
+}
+PI_BIN="$(resolve_pi_bin || true)"
+[ -n "$PI_BIN" ] || die "'pi' is required"
+NODE_VERSION="$(node --version | sed 's/^v//')"
+node -e 'const [a,b]=process.versions.node.split(".").map(Number);if(a<22||(a===22&&b<19))process.exit(1)' ||
+  die "node $NODE_VERSION is too old; Node >=22.19 is required"
 
-# pi-hashline-edit-pro declares engines.node >= 22.19.0. Fail here with a clear
-# message rather than part-way through installing 16 packages.
-NODE_FULL="$(node --version 2>/dev/null | tr -d 'v')"
-NODE_MAJOR="${NODE_FULL%%.*}"
-case "$NODE_MAJOR" in
-  ''|*[!0-9]*) die "Could not determine node version (got '${NODE_FULL:-nothing}')." ;;
-esac
-if [ "$NODE_MAJOR" -lt 22 ]; then
-  die "node $NODE_FULL is too old — pi-hashline-edit-pro needs >= 22.19.0."
-fi
-ok "node $NODE_FULL"
-
-# ── Is pi actually going to read our settings file? ──────────────────
-# pi reads global settings from $PI_CODING_AGENT_DIR (default ~/.pi/agent).
-# If this repo isn't cloned to ~/.pi, everything below would configure a
-# different settings.json than the one in this repo — silently.
-bold "Checking config location"
-PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-if [ "$(cd "$REPO_ROOT/agent" 2>/dev/null && pwd -P)" = "$(cd "$PI_DIR" 2>/dev/null && pwd -P)" ]; then
-  ok "pi reads $SETTINGS"
-else
-  warn "pi reads its global settings from: $PI_DIR"
-  warn "but this repo's settings file is:   $SETTINGS"
-  warn "Clone this repo to ~/.pi, or export PI_CODING_AGENT_DIR=$REPO_ROOT/agent"
-  die  "Refusing to continue — packages would install against the wrong config."
-fi
-
-# ── Shadowed packages ────────────────────────────────────────────────
-# pi resolves a user-scope npm package to agent/npm/node_modules/<name>, but
-# ONLY if it already exists there. Otherwise it falls back to a globally
-# npm-installed copy and uses that instead (getNpmInstallPath -> legacy global
-# path). A stale `npm i -g <pi-package>` therefore silently shadows the version
-# this repo declares, and the config you are reading is not the one running.
-bold "Checking for globally-installed pi packages"
-GLOBAL_ROOT="$(npm root -g 2>/dev/null || true)"
-shadowed=0
-if [ -n "$GLOBAL_ROOT" ] && [ -d "$GLOBAL_ROOT" ]; then
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    if [ -d "$GLOBAL_ROOT/$name" ] && [ ! -d "agent/npm/node_modules/$name" ]; then
-      warn "$name is installed globally and will shadow this repo's copy"
-      shadowed=$((shadowed + 1))
-    fi
-  done < <(node -e '
-    const d = require("./agent/settings.json");
-    for (const p of d.packages) {
-      const s = typeof p === "string" ? p : p.source;
-      if (s.startsWith("npm:")) console.log(s.slice(4).replace(/@[^@/]+$/, ""));
-    }' 2>/dev/null)
-fi
-if [ "$shadowed" -gt 0 ]; then
-  warn ""
-  warn "Remove them so pi manages its own copies under agent/npm:"
-  warn "  npm rm -g <name> ...    # then re-run this script"
-  warn "Stale global copies are a real hazard: an old amp-themes bundles"
-  warn "pi-tool-display, whose 'read' tool collides with pi-hashline-edit-pro"
-  warn "and stops pi from starting at all."
-else
-  ok "none shadowing"
-fi
-
-# ── rtk ──────────────────────────────────────────────────────────────
-bold "rtk (token-reducing CLI proxy)"
-if command -v rtk >/dev/null 2>&1 && [ "$FORCE" != "--force" ]; then
-  ok "already installed"
-elif command -v brew >/dev/null 2>&1; then
-  brew install rtk
-else
-  warn "skipped — install Homebrew, then: brew install rtk"
-fi
-
-# ── CodeMapper ───────────────────────────────────────────────────────
-bold "CodeMapper (cm)"
-if command -v cm >/dev/null 2>&1 && [ "$FORCE" != "--force" ]; then
-  ok "already installed — re-run with --force to rebuild"
-else
-  cargo install --locked --git https://github.com/p1rallels/codemapper.git
-fi
-
-# ── Local extension dependencies ─────────────────────────────────────
-# pi runs `npm install` for packages it installs, but NOT for extensions
-# auto-discovered under agent/extensions/. Their deps are ours to install.
-bold "Local extension dependencies"
-found=0
-for pkg_json in agent/extensions/*/package.json; do
-  [ -e "$pkg_json" ] || continue
-  found=1
-  dir="$(dirname "$pkg_json")"
-  echo "    npm install → $dir"
-  (cd "$dir" && npm install --omit=dev --no-audit --no-fund --silent)
-  ok "$(basename "$dir")"
+bold "Validating repository configuration"
+for file in settings.json jev.json zentui.json; do
+  node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))' "$SOURCE_AGENT/$file"
+  ok "$file"
 done
-[ "$found" -eq 1 ] || ok "none to install"
+for file in models.json mcp.json; do
+  if [ -f "$SOURCE_AGENT/$file" ]; then
+    node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))' "$SOURCE_AGENT/$file"
+    ok "$file"
+  fi
+done
+node - "$SOURCE_AGENT/settings.json" <<'NODE'
+const settings=JSON.parse(require("node:fs").readFileSync(process.argv[2],"utf8"));
+const errors=[];
+for(const entry of settings.packages??[]){
+  const source=typeof entry==="string"?entry:entry.source;
+  if(source.startsWith("npm:")){
+    if(source.slice(4).lastIndexOf("@")<=0)errors.push(`npm package is not exactly pinned: ${source}`);
+  }else if(source.startsWith("git:")){
+    if(source.slice(4).lastIndexOf("@")<=0)errors.push(`git package is not pinned to a ref: ${source}`);
+  }else errors.push(`unsupported package source: ${source}`);
+}
+if(errors.length){console.error(errors.join("\n"));process.exit(1)}
+NODE
+ok "all package sources are pinned"
+for pkg in "$SOURCE_AGENT"/extensions/*/package.json; do
+  [ -e "$pkg" ] || continue
+  [ -f "$(dirname "$pkg")/package-lock.json" ] || die "Missing lockfile for local extension: $pkg"
+done
+ok "local extension lockfiles"
 
-# ── Pi packages ──────────────────────────────────────────────────────
-# `pi update --extensions` installs anything missing and updates the rest,
-# reading agent/settings.json without rewriting it. Do NOT loop over
-# `pi install` here: that rewrites settings.json and would flatten the
-# object-form entries (e.g. the pi-hooks LSP filter) back into plain strings.
-bold "Pi packages"
-pi update --extensions
+mkdir -p "$TARGET_AGENT"
+TARGET_AGENT="$(cd "$TARGET_AGENT" && pwd -P)"
+SOURCE_AGENT_REAL="$(cd "$SOURCE_AGENT" && pwd -P)"
+PI_ROOT="$(dirname "$TARGET_AGENT")"
+BACKUP_ROOT="$PI_ROOT/backups/pi-cfg/$(date +%Y%m%d-%H%M%S)"
+BACKUP_CREATED=0
+backup_path() {
+  local relative="$1"
+  local source="$TARGET_AGENT/$relative"
+  [ -e "$source" ] || return 0
+  local destination="$BACKUP_ROOT/$relative"
+  mkdir -p "$(dirname "$destination")"
+  cp -pR "$source" "$destination" || die "Failed to back up $relative"
+  BACKUP_CREATED=1
+}
+sync_file() {
+  local relative="$1"
+  local source="$SOURCE_AGENT/$relative"
+  [ -f "$source" ] || return 0
+  local destination="$TARGET_AGENT/$relative"
+  if [ -f "$destination" ] && cmp -s "$source" "$destination"; then return 0; fi
+  backup_path "$relative"
+  mkdir -p "$(dirname "$destination")"
+  cp -p "$source" "$destination" || die "Failed to sync $relative"
+  ok "synced $relative"
+}
+sync_directory() {
+  local relative="$1"
+  local source="$SOURCE_AGENT/$relative"
+  [ -d "$source" ] || return 0
+  local destination="$TARGET_AGENT/$relative"
+  if [ -d "$destination" ] &&
+    diff -qr --exclude node_modules --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
+  backup_path "$relative"; mkdir -p "$destination"
+  rsync -a --delete --exclude node_modules --exclude .DS_Store "$source/" "$destination/" ||
+    die "Failed to sync $relative"
+  ok "synced $relative"
+}
 
+if [ "$SOURCE_AGENT_REAL" != "$TARGET_AGENT" ]; then
+  bold "Syncing repo-owned configuration"
+  for file in settings.json models.json mcp.json jev.json zentui.json; do sync_file "$file"; done
+  for extension in context.ts plan-mode.ts delegation-mode.ts jev-control; do
+    if [ -d "$SOURCE_AGENT/extensions/$extension" ]; then sync_directory "extensions/$extension"
+    else sync_file "extensions/$extension"; fi
+  done
+  retired="extensions/pi-rtk-optimizer"
+  if [ -e "$TARGET_AGENT/$retired" ]; then
+    backup_path "$retired"; rm -rf "$TARGET_AGENT/$retired"; ok "retired $retired"
+  fi
+else
+  ok "source is the live agent directory; no copy required"
+fi
+if [ "$BACKUP_CREATED" -eq 1 ]; then ok "backup: $BACKUP_ROOT"; fi
+
+bold "Installing local extension dependencies"
+for pkg in "$TARGET_AGENT"/extensions/*/package.json; do
+  [ -e "$pkg" ] || continue; dir="$(dirname "$pkg")"
+  (cd "$dir" && npm ci --omit=dev --no-audit --no-fund --silent); ok "$(basename "$dir")"
+done
+
+bold "Materializing exact npm package set"
+mkdir -p "$TARGET_AGENT/npm"
+node - "$TARGET_AGENT/settings.json" "$TARGET_AGENT/npm/package.json" <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const dependencies = {};
+for (const entry of settings.packages ?? []) {
+  const source = typeof entry === "string" ? entry : entry.source;
+  if (!source.startsWith("npm:")) continue;
+  const spec = source.slice(4);
+  const split = spec.lastIndexOf("@");
+  dependencies[spec.slice(0, split)] = spec.slice(split + 1);
+}
+fs.writeFileSync(
+  process.argv[3],
+  `${JSON.stringify({ name: "pi-extensions", private: true, dependencies }, null, 2)}\n`,
+  { mode: 0o600 },
+);
+NODE
+npm install --prefix "$TARGET_AGENT/npm" --legacy-peer-deps --no-audit --no-fund --silent
+ok "exact npm dependency graph"
+
+bold "Installing pinned Pi packages"
+PI_CODING_AGENT_DIR="$TARGET_AGENT" "$PI_BIN" update --extensions
+PI_CODING_AGENT_DIR="$TARGET_AGENT" "$PI_BIN" list
+
+LIVE_AGENT="$HOME/.pi/agent"
+if [ -d "$LIVE_AGENT" ]; then LIVE_AGENT="$(cd "$LIVE_AGENT" && pwd -P)"; fi
+if [ "$TARGET_AGENT" = "$LIVE_AGENT" ]; then
+  bold "Installing Pi startup preflight"
+  scripts/install-pi-launcher.sh
+fi
 bold "Done"
-pi list
+ok "live config: $TARGET_AGENT"

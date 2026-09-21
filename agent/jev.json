@@ -1,0 +1,8 @@
+{
+  "provider": "typesafe",
+  "disabled": false,
+  "compaction": {
+    "keepThreshold": 0.5,
+    "minReduction": 0.15
+  }
+}

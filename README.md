@@ -1,279 +1,244 @@
-# ✨ pi-cfg
+# pikachu
 
-My personal **pi** agent configuration — packages, extensions, and bootstrap scripts to get a full
-coding-agent environment running on any machine in minutes.
+**Pikachu is a curated, reproducible configuration for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent).**
+It combines Jev context compaction, automatic model routing, lazy specialist tools, LSP and AST
+code intelligence, subagent delegation, interactive planning, session todos, command safety, and
+automatic updates in one focused Pi setup.
 
-> **[pi](https://github.com/earendil-works/pi)** is an AI coding agent that lives in your terminal.
+This repository is useful if you are searching for a practical **Pi configuration**, **Pi coding
+agent plugins**, **Pi extensions**, **Jev compaction**, **AI coding agent workflow**, **LSP coding
+agent**, **subagent orchestration**, or **automatic Pi updater**.
 
----
+## What is included
 
-## 🚀 Quick Start
+| Capability | Implementation |
+|---|---|
+| Context compaction | `@alexlikevibe/pi-jev@0.2.1` with native Pi fallback |
+| Model routing | Local TypeSafe-backed Jev controller for Luna and Sol tiers |
+| Code intelligence | `pi-lens@4.2.1` for LSP, diagnostics, symbols, and AST search |
+| Editing | `pi-hashline-edit-pro@4.3.5` for hash-anchored changes |
+| Delegation | `pi-subagents@0.70.0` and `@weshipwork/pi-herdr@0.1.0` |
+| Review | pi-subagents' maintained parallel-review workflow |
+| Web access | `pi-web-access@0.30.0`, activated only when needed |
+| User questions | `pi-ask-user@0.15.0`, active from session start |
+| MCP integration | `pi-mcp-adapter@2.34.0` with lazy Trello and RevenueCat servers |
+| Terminal UI | `pi-zentui@0.25.0` as the persistent footer and UI owner |
+| Command safety | `cc-safety-net@2.4.4` with its standard protection profile |
+| Simplification | `pi-simplify@0.2.3` for focused post-change cleanup |
+| Design guidance | `emilkowalski/skills`, pinned and filtered to `apple-design` |
+| Automatic updates | A `pi` launcher that updates Pi, models, config, and pinned extensions |
+
+All executable packages are pinned to an exact npm version or Git commit in
+[`agent/settings.json`](agent/settings.json).
+
+The default profile uses the dark theme, `openai-codex/gpt-5.6-luna`, and low thinking. The model
+picker includes OpenAI Codex models plus the keyless `titox/deepseek-v4-flash` definition from
+[`agent/models.json`](agent/models.json). MCP endpoints are defined without credentials in
+[`agent/mcp.json`](agent/mcp.json); OAuth credentials remain in Pi's credential storage.
+
+## Workflow features
+
+### Jev compaction
+
+Jev keeps high-value messages verbatim instead of replacing the conversation with a generated
+summary. It uses a 50% keep threshold and requires at least 15% estimated reduction. Missing
+credentials, authentication failures, timeouts, cancellation, and inadequate reduction fall back
+to Pi's native compaction.
+
+```text
+/compact
+```
+
+Non-secret settings are stored in [`agent/jev.json`](agent/jev.json). The TypeSafe API key is read
+only from the environment and is never written to the repository or Pi session files.
+
+### Automatic model routing
+
+Jev classifies only the latest user request and chooses the smallest configured model tier likely
+to complete it reliably.
+
+| Work level | Model and thinking level |
+|---|---|
+| Easy | `openai-codex/gpt-5.6-luna`, low |
+| Routine | `openai-codex/gpt-5.6-sol`, low |
+| Demanding | `openai-codex/gpt-5.6-sol`, medium |
+| Hard | `openai-codex/gpt-5.6-sol`, high |
+
+```text
+/jev-route auto
+/jev-route off
+/jev-route status
+```
+
+A manual model selection disables routing for that session until `/jev-route auto` is used.
+Low-confidence classifications, missing credentials, unavailable models, and request failures keep
+the current model. TitoX remains available for manual selection.
+
+### Lazy specialist tools
+
+Core file and shell tools, hashline editing, todos, safety tooling, `ask_user`, and the selected
+delegation tool start active. Web access, pi-lens tools, and MCP tools start hidden to keep the
+model's tool surface small.
+
+```text
+jev_find_tools({ query: "search current documentation and inspect symbol references" })
+/jev-tools status
+/jev-tools reset
+```
+
+Tool activation is additive for the session. Jev validates deterministic local matches when a
+TypeSafe key is available; otherwise keyword matching provides the fallback. Delegation tools are
+managed separately and are never changed by the specialist router.
+
+### Interactive plan mode
+
+```text
+/plan <request>
+```
+
+The command enters read-only plan mode and submits the request immediately. While planning, Pi can
+inspect the project but cannot edit files or execute mutating commands. When the plan is ready, a
+scrollable Markdown panel presents three choices:
+
+1. Implement the plan in the current context.
+2. Clear context, then implement the plan.
+3. Stay in plan mode and continue revising the plan.
+
+The first two choices exit plan mode automatically. Manual controls remain available through
+`/plan on`, `/plan off`, and `/plan status`.
+
+### Session todos
+
+The model-facing `todo` tool supports `list`, `add`, `update`, `complete`, `remove`, `next`, and
+`review`. Todos have stable IDs, priorities, dependencies, status, details, and optional completion
+evidence. Dependency validation and cycle detection are deterministic.
+
+```text
+/todos
+```
+
+Todo state follows the current Pi session branch. Jev may rank ready work or flag duplicates,
+scope drift, and weak evidence, but it never silently deletes, rewrites, or completes an item.
+
+### Delegation and parallel review
+
+```text
+/delegate auto
+/delegate herdr
+/delegate subagents
+/delegate both
+/delegate status
+/review
+```
+
+`auto` uses Herdr when its tool and environment are available, otherwise it uses pi-subagents.
+The selection changes only the `herdr` and `subagent` tools and is reconstructed when a session or
+branch is reopened. `/review` selects subagents and starts the maintained parallel-review workflow.
+
+### Other commands
+
+| Command | Purpose |
+|---|---|
+| `/context` | Show detailed context and token usage |
+| `/zentui` | Configure the persistent terminal UI |
+| `/cc-safety-net` | Inspect or manage command-safety behavior |
+
+## Install
+
+Requirements:
+
+- Pi
+- Node.js 22.19 or newer
+- npm
+- rsync
+
+Clone the repository and deploy the configuration:
 
 ```bash
-git clone git@github.com:tsnAnh/pi-cfg.git ~/.pi
-~/.pi/scripts/setup-pi.sh
+git clone git@github.com:tsnAnh/pikachu.git
+cd pikachu
+scripts/setup-pi.sh
 ```
 
-The setup script is idempotent — re-run it any time. It handles:
-
-1. **Prerequisite checks** — `pi`, `npm`, `cargo` (and `brew`, if present), plus a guard that
-   this repo really is pi's config dir
-2. **rtk** — token-reducing CLI proxy, via Homebrew
-3. **CodeMapper (`cm`)** — built from [source](https://github.com/p1rallels/codemapper) via Cargo
-4. **Local extension deps** — `npm install` inside each `agent/extensions/*/`
-5. **Pi packages** — `pi update --extensions`, which installs anything missing and updates the
-   rest straight from `agent/settings.json`
-
-> **Prerequisites:** [Homebrew](https://brew.sh), [Node.js](https://nodejs.org/),
-> [Rust](https://rustup.rs), and pi itself.
-
-> **Already have a `~/.pi`?** `agent/settings.json` is tracked by this repo now. Back up your
-> existing one (`mv ~/.pi/agent/settings.json ~/.pi/agent/settings.json.bak`) before cloning, then
-> merge anything you want to keep.
-
-### Updating
+Optionally export the TypeSafe credential from your shell or secret manager:
 
 ```bash
-~/.pi/scripts/update-pi.sh
+export TYPESAFE_API_KEY="..."
 ```
 
-Updates the pi CLI, every configured package, model catalogs, rtk, `cm`, and local extension deps.
+Without the key, Pi still starts normally. Jev-dependent decisions use deterministic or native Pi
+fallbacks.
 
----
+Setup validates JSON, package pins, Node and Pi availability, and local extension lockfiles before
+deploying. It synchronizes only repository-owned files to `~/.pi/agent`, backs up replaced files,
+and preserves unknown live extensions, skills, credentials, and externally managed Herdr or Orca
+files.
 
-## ⚙️ Config
-
-**`agent/settings.json` is the config file pi actually reads.** Pi loads global settings from
-`~/.pi/agent/settings.json` and per-project settings from `.pi/settings.json` — nothing else. Every
-pi setting belongs in this file, not just packages:
-
-```json
-{
-  "theme": "dark",
-  "defaultProvider": "deepseek",
-  "defaultModel": "deepseek-v4-flash",
-  "defaultThinkingLevel": "off",
-  "packages": [
-    "npm:pi-hooks",
-    "git:github.com/elpapi42/pi-fork"
-  ]
-}
-```
-
-pi rewrites this file itself (it stores `lastChangelogVersion` here, and `/settings` writes to it),
-so expect it to show up dirty in `git status` from time to time. That is the trade for having the
-config actually version-controlled.
-
-Package sources: `npm:<name>[@version]` or `git:<repo>[@ref]`. Add one by editing this file and re-running the setup script. Avoid `pi install` for packages
-that use the object form — it rewrites entries as plain strings and would drop their filters.
-
-See the [full settings reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md).
-
----
-
-## 📦 Packages
-
-Declared in [`agent/settings.json`](agent/settings.json).
-
-### Agent capability
-
-| Package | What it does |
-|---|---|
-| **pi-subagents** | Delegation + scripted multi-agent workflows. Subagents burn their own context window and return a summary — the largest token lever available. |
-| **pi-web-access** | `web_search`, `fetch_content`, `source_check`, `get_search_content`. Pluggable providers, GitHub repo cloning, PDF/YouTube extraction. |
-| **pi-lens** | LSP diagnostics, AST-grep search/replace, formatters, `module_report` / `read_symbol`. Also ships an MCP server. |
-| **pi-hashline-edit-pro** | Hash-anchored `read` / `replace` / `undo_last_replace`. ⚠️ See *Behavior changes* below. |
-| **pi-ask-user** | `ask_user` — searchable split-pane selection, multi-select, freeform input. |
-| **@dietrichgebert/ponytail** | "Lazy senior dev" skills: `/ponytail`, `-audit`, `-debt`, `-gain`, `-review`. |
-| **emilkowalski/skills** | Skills only, filtered to `apple-design` — Apple's fluid-motion and interface design principles translated to the web. |
-| **pi-fork** | Fork-based isolated subprocess execution. |
-| **@weshipwork/pi-herdr** | Herdr workspace, tab, and pane controls; loads as a no-op outside Herdr. |
-| **pi-mcp-adapter** | MCP server integration for Pi. |
-| **pi-goal** | Persistent `/goal` execution with pause and budget controls. |
-| **unlazy** | Acceptance-ledger and runnable-gate discipline for substantial agent work. |
-
-### Context & tokens
-
-| Package | What it does |
-|---|---|
-| **pi-rtk-optimizer** | RTK command rewriting + `bash`/`grep` output compaction. Config in `agent/extensions/pi-rtk-optimizer/config.json`. |
-| **pi-observational-memory** | Tiered compaction with observations & reflections. |
-| **pi-caveman** | Ultra-compressed output prose, opt-in per session via `/caveman`. |
-| **pi-simplify** | `/simplify` — reviews recently changed code for clarity and maintainability. |
-
-### Workflow & UI
-
-| Package | What it does |
-|---|---|
-| **pi-hooks** | checkpoint, permission, ralph-loop, repeat, token-rate. Its `lsp` extension is **filtered out** — pi-lens owns LSP. |
-| **pi-mermaid** | Mermaid diagrams as ASCII in the TUI. |
-| **amp-themes** | Amp-inspired theme, editor chrome, compact tool display. |
-| **pi-powerline-footer** | Powerline-style status bar. |
-| **@tmustier/pi-usage-extension** | Session usage / cost dashboard. |
-
----
-
-## ⚠️ Behavior changes to know about
-
-**`pi-hashline-edit-pro` removes the built-in `edit` tool.** On `session_start` it calls
-`setActiveTools(active.filter(t => t !== "edit"))` and registers its own `read`. Editing goes
-through `replace` against 3-char line hashes; stale or ambiguous anchors are rejected rather than
-fuzzy-matched. If edits start behaving unexpectedly, this is why — remove the package to get `edit`
-back. Its own config lives in `~/.config/pi-hashline-edit-pro/`.
-
-This interacts safely with `pi-rtk-optimizer`: rtk only compacts `bash`, `read` and `grep` output,
-and `readCompaction.enabled` is `false` here, so hash anchors are passed through byte-exact.
-
-**`pi-web-access` needs no key to start** — Exa MCP gives zero-config search — but more providers
-(Brave, Tavily, Exa direct, Jina, …) need keys in `web-search.json`. That file lands in **this
-repo's root** unless `PI_CODING_AGENT_DIR` is set, and it holds plaintext keys, so it's gitignored.
-Don't force-add it.
-
-**The default model uses DeepSeek directly.** `agent/settings.json` defaults to
-`deepseek/deepseek-v4-flash` with thinking off. Authenticate once in Pi:
-
-```
-pi        # then: /login  →  DeepSeek
-```
-
-or export `DEEPSEEK_API_KEY`. The model is text-only; Ctrl+P can switch models mid-session.
-
-**`emilkowalski/skills` is filtered to one skill.** The repo ships 11 skills; loading all of them
-would put 11 descriptions in every system prompt. The entry uses
-`"skills": ["skills/apple-design"]` so only that one loads. Drop the filter if you want the rest —
-the animation ones (`animate`, `review-animations`, `improve-animations`) are the obvious next picks.
-
-**`amp-themes` and `pi-hashline-edit-pro` both claim the `read` tool.** amp-themes'
-`amp-tool-display.ts` re-registers *all* of pi's built-ins (`bash`, `edit`, `find`, `grep`, `ls`,
-`read`, `write`) purely to override their render hooks — it inherits each real `ToolDefinition` and
-swaps only `renderCall`/`renderResult`. Harmless on its own; fatal next to hashline, which registers
-its own `read`. pi refuses to start:
-
-```
-Error: Failed to load extension ".../amp-themes/extensions/amp-tool-display.ts":
-Tool "read" conflicts with .../pi-hashline-edit-pro/index.ts
-```
-
-Resolved with a filter — amp-themes keeps its theme, editor chrome and user-message rendering, and
-gives up only Amp-style tool rendering:
-
-```json
-{ "source": "npm:amp-themes", "extensions": ["!extensions/amp-tool-display.ts"] }
-```
-
-If you would rather have Amp's tool rendering than hash-anchored editing, drop
-`pi-hashline-edit-pro` instead and remove this filter.
-
-**A globally-installed pi package silently shadows this repo's copy.** pi resolves a user-scope
-`npm:` package to `agent/npm/node_modules/<name>` *only if it already exists there*; otherwise it
-falls back to whatever `npm root -g` has and uses that (`getNpmInstallPath` → legacy global path).
-So `npm i -g amp-themes` from months ago wins over the version this repo declares, and the config
-you are reading is not the one running.
+To validate or deploy another Pi profile:
 
 ```bash
-npm ls -g --depth 0        # see what is shadowing
-npm rm -g amp-themes       # and any other pi-* listed there
+scripts/setup-pi.sh --target /absolute/path/to/agent
 ```
 
-`setup-pi.sh` warns about this before it installs anything, but it will not remove anything for
-you — uninstalling from your global npm is your call, not a setup script's.
+## Automatic Pi updates
 
-**`pi-powerline-footer` and `amp-themes` fight over keybindings.** Starting pi prints a cascade of
-`[powerline-footer] Shortcut conflict ...` lines, each one displacing the next, ending with
-`editorEnd: "super+shift+down" is already in use`. Non-fatal, but it means some of those shortcuts
-are not where either package thinks. This is the §6 duplicate-UI problem in practice: pick one of
-the two, or accept remapped keys.
+For the standard live profile, setup installs a preflight launcher at `~/.local/bin/pi`. When that
+directory appears before the package-managed Pi binary in `PATH`, running `pi` performs these steps
+before the TUI starts:
 
-**`pi-rtk-optimizer` is behind on tested compatibility.** Its latest release (0.9.0) declares
-`peerDependencies` of `^0.74 || ^0.75 || ^0.78 || ^0.79 || ^0.80` for pi, and pi is now 0.84.2. It
-installs anyway — pi passes `--legacy-peer-deps` — but it has not been tested against this pi.
-If tool output starts looking mangled, check `/rtk show` first.
+1. Fast-forward this repository when its checkout is clean and has an upstream.
+2. Validate and sync the allowlisted configuration.
+3. Reconcile local dependencies and exact extension pins.
+4. Update the Pi CLI and model catalogs.
+5. Report newer plugin versions without silently rewriting reviewed pins.
 
-**`pi-minimal-subagent` was removed.** It registered a tool literally named `subagent`, colliding
-with `pi-subagents`, which is a superset of it.
+Update failures are logged and fail open, so an unavailable Git host or npm registry does not
+prevent Pi from starting with the current installation. A process lock prevents concurrent Pi
+launches from running competing updates.
 
-**`pi-caveman` now comes from npm, not git.** There are two independent implementations of the same
-idea — `npm:pi-caveman` (jonjonrankin) and `git:github.com/v2nic/pi-caveman` — and both register
-`/caveman`. The npm one is what was already installed and working, and it updates through
-`pi update`.
-
----
-
-## 🔎 grep is already ripgrep
-
-Worth knowing before reaching for an rg extension: pi's built-in `grep` tool **is** ripgrep.
-`core/tools/grep.ts` calls `ensureTool("rg")` and spawns the binary — there is no non-rg fallback, it
-errors out if rg cannot be obtained. Likewise `find` is `fd`. pi prefers a system `rg`/`fd` if one is
-on `PATH` and otherwise downloads them into `agent/bin/` (that is what the `fd` binary in there is;
-`rg` appears on the first `grep` call).
-
-So the tool is named `grep` and behaves like `rg`. Renaming it would only break the skills and
-prompts that refer to `grep`. Separately, `pi-rtk-optimizer` rewrites shell commands through
-`rtk rewrite`, which covers `grep` typed into `bash`.
-
----
-
-## 🗂 Retired
-
-- `agent/prompts/plan.md` and `agent/skills/plan/` — moved to `_to_delete/` on the machine. The
-  prompt was a 7-line wrapper around the skill, and both were superseded by the decision to skip
-  `pi-plan` (see `OPTIMIZATIONS.md` §12). `_to_delete/` is gitignored; delete it yourself when
-  you are happy.
-
----
-
-## 🧩 Local Extensions
-
-Auto-discovered by pi from `agent/extensions/`:
-
-| Extension | What it does |
-|---|---|
-| `context.ts` | `/context` — colored grid of context usage by category, plus cache stats |
-| `plan-mode.ts` | `/plan` — read-only plan mode. Gates calls at `tool_call` instead of swapping the tool set, so nothing is lost on the way out. |
-
-`web-fetch/` and `ask-user-question.ts` were removed once `pi-web-access` and `pi-ask-user` covered
-the same ground as maintained packages.
-
----
-
-## 📁 Layout
-
-```
-~/.pi/                         ← this repo
-├── README.md
-├── OPTIMIZATIONS.md           # review notes & backlog
-├── web-search.json            # 🚫 never committed — pi-web-access provider keys
-├── scripts/
-│   ├── setup-pi.sh            # bootstrap (idempotent)
-│   └── update-pi.sh           # update everything to latest
-└── agent/                     # pi's config dir (PI_CODING_AGENT_DIR)
-    ├── settings.json          # ✅ tracked — the real config
-    ├── AGENTS.md              # ✅ tracked — global instructions (optional)
-    ├── extensions/            # ✅ tracked — local extensions
-    ├── skills/                # ✅ tracked — local skills
-    ├── prompts/               # ✅ tracked — prompt templates
-    ├── themes/                # ✅ tracked — custom themes
-    ├── auth.json              # 🚫 never committed — API keys & OAuth tokens
-    ├── trust.json             # 🚫 ignored
-    ├── sessions/              # 🚫 ignored
-    ├── git/                   # 🚫 ignored — cloned git packages
-    └── npm/                   # 🚫 ignored — installed npm packages
+```bash
+pi --skip-update                         # skip once
+PI_AUTO_UPDATE=0 pi                      # skip for this invocation
+PI_AUTO_UPDATE_INTERVAL_SECONDS=21600 pi # update at most once every six hours
 ```
 
----
+The update log is stored at `~/.cache/pi-cfg/update.log`. Manual updates use the same deployment
+path:
 
-## 💡 Tips
+```bash
+scripts/update-pi.sh
+```
 
-| Need | Command |
-|---|---|
-| New machine | `git clone → ./scripts/setup-pi.sh` |
-| Add a package | `pi install npm:foo`, then commit `agent/settings.json` |
-| Update everything | `./scripts/update-pi.sh` |
-| Toggle extensions/skills | `pi config` |
-| Check installs | `pi list` |
-| Verify `cm` | `cm stats .` |
-| RTK savings this session | `/rtk stats` |
+Package upgrades remain reviewable: update the exact version in `agent/settings.json`, update any
+affected lockfile, run validation, and commit the result.
 
----
+## Repository layout
 
-*Built with ❤️ for the pi community.*
+```text
+agent/
+├── settings.json                 # Pi settings and exact package pins
+├── models.json                   # Additional model definitions
+├── mcp.json                      # MCP server definitions, without credentials
+├── jev.json                      # Non-secret Jev compaction settings
+├── zentui.json                   # Persistent UI settings
+└── extensions/
+    ├── context.ts                # /context
+    ├── plan-mode.ts              # /plan workflow and approval panel
+    ├── delegation-mode.ts        # /delegate and /review
+    └── jev-control/              # Routing, lazy tools, and session todos
+scripts/
+├── setup-pi.sh                   # Validate, back up, and deploy config
+├── update-pi.sh                  # Update Pi/models and report package drift
+├── pi-launcher.sh                # Pre-start automatic update wrapper
+└── install-pi-launcher.sh        # Install the wrapper in ~/.local/bin
+```
+
+Provider credentials stay in ignored Pi files or operating-system credential storage. Do not
+commit `agent/auth.json`, API keys, OAuth tokens, session history, or generated package directories.
+
+## Search keywords
+
+Pi coding agent configuration, Pi plugins, Pi extensions, Jev compaction, TypeSafe AI, AI coding
+agent, coding assistant, LSP agent, AST search, subagents, multi-agent coding, agent delegation,
+parallel code review, plan mode, context management, automatic model routing, terminal coding
+agent, developer tools, and automatic Pi updates.
