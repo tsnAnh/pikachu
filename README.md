@@ -20,7 +20,7 @@ agent**, **subagent orchestration**, or **automatic Pi updater**.
 | Delegation | `pi-subagents@0.70.0` and `@weshipwork/pi-herdr@0.1.0` |
 | Review | pi-subagents' maintained parallel-review workflow |
 | Web research | `pi-web-access@0.30.0`, activated only when needed |
-| Browser automation | Pinned `browser-use/jev-ultrafast` with TypeSafe decisions and Sol-low field text |
+| Browser automation | Pinned Browser Use default with Pi-authenticated Sol-low bridge; pinned Jev Ultrafast fallback |
 | User questions | `pi-ask-user@0.15.0`, active from session start |
 | MCP integration | `pi-mcp-adapter@2.34.0` with lazy Trello and RevenueCat servers |
 | Terminal UI | `pi-zentui@0.25.0` as the persistent footer and UI owner |
@@ -94,40 +94,23 @@ TypeSafe key is available; otherwise keyword matching provides the fallback. Del
 managed separately and are never changed by the specialist router.
 
 
-### Jev Ultrafast browser automation
+### Browser automation: Browser Use by default, Jev fallback
 
-`browser_use` operates interactive pages through a complete checkout of
-[`browser-use/jev-ultrafast`](https://github.com/browser-use/jev-ultrafast), pinned to commit
-`1231850a0bf1a0c0341fe408ef1668dbbfdfac46`. The deployed checkout retains the upstream CLI,
-inspector, examples, tests, snapshot implementation, recording utilities, documentation, and frozen
-`uv.lock`; the Pi tool invokes that checkout's `Agent` directly. Use it for clicking, typing,
-selecting, scrolling, and navigation.
-Continue to use `web_search`, `fetch_content`, `source_check`, and
-`get_search_content` for research and retrieval.
+`browser_use` controls the persistent CloakBrowser instance on `127.0.0.1:9223`. Omit `engine` (or use `engine: "browser-use"`) for the complete [`browser-use/browser-use`](https://github.com/browser-use/browser-use) agent pinned at `d8110c5ff87ccba887aaa726cdb780f2f84bef8d`. It supports broader, longer-horizon workflows. Select `engine: "jev"` for the lower-overhead indexed-DOM loop from [`browser-use/jev-ultrafast`](https://github.com/browser-use/jev-ultrafast), independently pinned at `1231850a0bf1a0c0341fe408ef1668dbbfdfac46`.
 
-Jev sends the visible indexed action space to TypeSafe using the existing environment-only
-`TYPESAFE_API_KEY`. When a field needs text, the local Pi extension calls exactly
-`openai-codex/gpt-5.6-sol` at low reasoning through Pi's configured provider authentication.
-The Pi adapter requires the persistent Browser Harness daemon started during setup; it never
-auto-starts a replacement daemon during a tool call, preventing repeated macOS approval prompts.
-Mercury, OpenRouter, and a separate `TEXT_MODEL_API_KEY` are not used. Provider credentials remain
-inside Pi and are never passed to the Python browser process.
-
-Chrome must be running with remote debugging enabled at `chrome://inspect/#remote-debugging`.
-Diagnose the connection with:
-
-```bash
-~/.pi/agent/extensions/jev-browser/.upstream/.venv/bin/browser-harness --doctor
+```json
+{
+  "url": "https://example.com",
+  "goal": "Complete the visible form without submitting it",
+  "engine": "jev"
+}
 ```
 
-Browser actions can create real external side effects. Give the tool one narrow goal with a visibly
-verifiable outcome and obtain explicit confirmation before consequential actions. A Jev `DONE`
-decision is not independent proof of success. The pinned upstream MVP supports indexed common HTML
-and ARIA controls; frames, canvas, uploads, pop-up tabs, nested scrolling, and unusual keyboard
-widgets remain unsupported.
-The tracked `navigation-settle.patch` adds a generic post-link wait for URL, title, and document readiness
-so dynamic listings do not snapshot the previous page after navigation. It contains no site-specific
-selectors or article names.
+Both engines reuse the current shared tab and persistent profile, preserve pre-existing tabs, leave CloakBrowser running, and share one global mutex. Browser Use may open an incidental page only when the requested workflow requires it; existing user tabs remain protected. Neither engine attaches to ordinary Chrome. Chrome session import remains optional and requires explicit confirmation via `/browser-session-import`.
+
+Browser Use model calls are bridged to exactly `openai-codex/gpt-5.6-sol` with low reasoning through Pi's configured provider authentication. Messages, vision content, schemas, and structured responses are bounded and validated. Provider credentials never enter Python; Browser Use Cloud, `OPENAI_API_KEY`, and `BROWSER_USE_API_KEY` are not used. Jev alone requires the environment-only `TYPESAFE_API_KEY` and retains its Sol-low field-text helper, Browser Harness integration, and tracked navigation-settling patch.
+
+Use `web_search`, `fetch_content`, `source_check`, and `get_search_content` for research and retrieval. Browser actions can cause real external side effects: provide one narrow, visibly verifiable goal and obtain explicit confirmation before consequential actions. Agent completion is not independent proof of success.
 ### Interactive plan mode
 
 ```text
@@ -191,7 +174,7 @@ Requirements:
 - rsync
 - Python 3.12 or newer
 - `uv`
-- Chrome with remote debugging enabled for browser automation
+- Chrome remote debugging only when explicitly importing an existing Chrome session
 
 Clone the repository and deploy the configuration:
 
@@ -286,7 +269,7 @@ agent/
     ├── plan-mode.ts              # /plan workflow and approval panel
     ├── delegation-mode.ts        # /delegate and /review
     ├── jev-control/              # Routing, lazy tools, and session todos
-    └── jev-browser/              # Jev Ultrafast tool and Sol-low text bridge
+    └── jev-browser/              # Browser Use default, Jev fallback, shared CloakBrowser bridge
 scripts/
 ├── setup-pi.sh                   # Validate, back up, and deploy config
 ├── update-pi.sh                  # Update Pi/models and report package drift

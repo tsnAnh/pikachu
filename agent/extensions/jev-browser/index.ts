@@ -1,47 +1,66 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import {
   boundedError,
+  BROWSER_USE_MODEL,
   isPlanMode,
-  TEXT_MODEL_ID,
-  TEXT_MODEL_PROVIDER,
+  MAX_MODEL_IMAGE,
+  MAX_MODEL_MESSAGES,
+  MAX_MODEL_SCHEMA,
+  MAX_MODEL_TEXT,
   parseBridgeLine,
+  parseModelJson,
   parseTextModelOutput,
   safeEnvironment,
+  selectEngine,
+  TEXT_MODEL_ID,
+  TEXT_MODEL_PROVIDER,
   type BridgeMessage,
+  type BrowserEngine,
 } from "./src/core.js";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
-const PYTHON = join(EXTENSION_DIR, ".upstream", ".venv", "bin", "python");
-const RUNNER = join(EXTENSION_DIR, "runner.py");
+const JEV_PYTHON = join(EXTENSION_DIR, ".upstream", ".venv", "bin", "python");
+const JEV_RUNNER = join(EXTENSION_DIR, "runner.py");
+const BROWSER_USE_PYTHON = join(EXTENSION_DIR, ".browser-use-upstream", ".venv", "bin", "python");
+const BROWSER_USE_RUNNER = join(EXTENSION_DIR, "browser_use_runner.py");
 const DEFAULT_TIMEOUT_SECONDS = 120;
+let browserInUse = false;
 
 const BrowserParams = Type.Object({
   url: Type.String({ description: "Initial http(s) URL" }),
   goal: Type.String({ description: "One narrow browser-automation goal with a visibly verifiable outcome" }),
+  engine: Type.Optional(Type.Union([Type.Literal("browser-use"), Type.Literal("jev")], { description: "Default browser-use; use jev for the lower-overhead indexed-DOM engine" })),
   timeoutSeconds: Type.Optional(Type.Integer({ minimum: 15, maximum: 300, description: "Overall deadline; default 120 seconds" })),
-});
+}, { additionalProperties: false });
 
 interface BrowserParamsValue {
   url: string;
   goal: string;
+  engine?: BrowserEngine;
   timeoutSeconds?: number;
 }
-
 interface BrowserResult {
   type: "result";
+  engine?: BrowserEngine;
   status: string;
   page_text?: string;
+  final_result?: string;
   url: string;
   title?: string;
   elapsed_ms?: number;
   actions?: Array<{ step?: number; kind?: string; action?: string; text?: string; url?: string }>;
+  errors?: string[];
+  model?: string;
   text_models?: string[];
+  tabs_before?: string[];
+  tabs_after?: string[];
 }
 
 function assistantText(message: unknown): string {
@@ -73,10 +92,63 @@ async function generateFieldText(context: unknown, ctx: ExtensionContext, signal
   return { text: parseTextModelOutput(assistantText(result)), usage: (result as { usage?: unknown }).usage ?? {} };
 }
 
+async function generateBrowserUseCompletion(request: BridgeMessage, ctx: ExtensionContext, signal: AbortSignal): Promise<{ completion: unknown; usage: unknown }> {
+  if (request.model !== BROWSER_USE_MODEL) throw new Error(`Browser Use requested unsupported model: ${String(request.model)}`);
+  if (!Array.isArray(request.messages) || request.messages.length === 0 || request.messages.length > MAX_MODEL_MESSAGES) throw new Error("Browser Use sent an invalid or oversized message list");
+  const schemaText = request.schema === null || request.schema === undefined ? "" : JSON.stringify(request.schema);
+  if (schemaText.length > MAX_MODEL_SCHEMA) throw new Error("Browser Use output schema is too large");
+  let totalText = 0;
+  const systems: string[] = [];
+  const messages: Array<{ role: "user"; content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; timestamp: number }> = [];
+  for (const raw of request.messages) {
+    if (!raw || typeof raw !== "object") throw new Error("Browser Use sent a malformed message");
+    const message = raw as { role?: unknown; content?: unknown };
+    if (!Array.isArray(message.content) || !["system", "user", "assistant"].includes(String(message.role))) throw new Error("Browser Use sent a malformed message");
+    const parts: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
+    for (const rawPart of message.content) {
+      if (!rawPart || typeof rawPart !== "object") throw new Error("Browser Use sent a malformed content part");
+      const part = rawPart as { type?: unknown; text?: unknown; url?: unknown; media_type?: unknown };
+      if (part.type === "text" && typeof part.text === "string") {
+        totalText += part.text.length;
+        parts.push({ type: "text", text: part.text });
+      } else if (part.type === "image" && typeof part.url === "string") {
+        const match = /^data:([^;,]+);base64,(.+)$/s.exec(part.url);
+        if (!match || match[2].length > MAX_MODEL_IMAGE) throw new Error("Browser Use sent an unsupported or oversized image");
+        parts.push({ type: "image", data: match[2], mimeType: match[1] });
+      } else throw new Error("Browser Use sent an unsupported content part");
+    }
+    if (totalText > MAX_MODEL_TEXT) throw new Error("Browser Use messages are too large");
+    if (message.role === "system") systems.push(parts.filter((part): part is { type: "text"; text: string } => part.type === "text").map((part) => part.text).join("\n"));
+    else {
+      if (message.role === "assistant") parts.unshift({ type: "text", text: "[Prior assistant message]\n" });
+      messages.push({ role: "user", content: parts, timestamp: Date.now() });
+    }
+  }
+  if (messages.length === 0) throw new Error("Browser Use sent no user or assistant messages");
+  const schemaInstruction = schemaText ? `\nReturn only strict JSON matching this JSON Schema exactly:\n${schemaText}` : "";
+  const model = ctx.modelRegistry.find(TEXT_MODEL_PROVIDER, TEXT_MODEL_ID);
+  if (!model) throw new Error(`${BROWSER_USE_MODEL} is unavailable`);
+  const response = await ctx.modelRegistry.complete(model, { systemPrompt: `${systems.join("\n\n")}${schemaInstruction}`, messages }, { reasoning: "low", maxTokens: 32_000, signal });
+  const text = assistantText(response);
+  if (!schemaText) return { completion: text, usage: (response as { usage?: unknown }).usage ?? {} };
+  const completion = parseModelJson(text);
+  if (!Value.Check(request.schema as never, completion)) throw new Error("Browser Use model response failed schema validation");
+  return { completion, usage: (response as { usage?: unknown }).usage ?? {} };
+}
+
 function writeMessage(child: ChildProcessWithoutNullStreams, message: unknown): void {
-  if (!child.stdin.writable) throw new Error("Jev browser bridge is not writable");
+  if (!child.stdin.writable) throw new Error("Browser bridge is not writable");
   child.stdin.write(`${JSON.stringify(message)}\n`);
 }
+function exec(program: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(program, args, { timeout: 60_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(stderr.trim() || error.message));
+      else resolve({ stdout, stderr });
+    });
+  });
+}
+
 
 function validateUrl(raw: string): string {
   let url: URL;
@@ -95,12 +167,17 @@ async function runBrowser(
   onUpdate: ((result: { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> }) => void) | undefined,
   ctx: ExtensionContext,
 ): Promise<BrowserResult> {
-  accessSync(PYTHON, constants.X_OK);
-  if (!process.env.TYPESAFE_API_KEY?.trim()) throw new Error("TYPESAFE_API_KEY is unavailable; run setup to configure Jev");
-
-  const child = spawn(PYTHON, [RUNNER], {
+  const engine = selectEngine(params.engine);
+  const python = engine === "jev" ? JEV_PYTHON : BROWSER_USE_PYTHON;
+  const runner = engine === "jev" ? JEV_RUNNER : BROWSER_USE_RUNNER;
+  accessSync(python, constants.X_OK);
+  if (engine === "jev" && !process.env.TYPESAFE_API_KEY?.trim()) throw new Error("TYPESAFE_API_KEY is unavailable; run setup to configure Jev");
+  const child = spawn(python, [runner], {
     cwd: EXTENSION_DIR,
-    env: { ...safeEnvironment(process.env), BH_REQUIRE_EXISTING_DAEMON: "1" },
+    env: {
+      ...safeEnvironment(process.env, engine === "jev"),
+      ...(engine === "jev" ? { BH_REQUIRE_EXISTING_DAEMON: "1", BU_NAME: "pikachu-chromium", BU_CDP_URL: "http://127.0.0.1:9223" } : {}),
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -151,6 +228,15 @@ async function runBrowser(
           } catch (error) {
             writeMessage(child, { type: "text_response", id, error: error instanceof Error ? error.message : String(error) });
           }
+        } else if (message.type === "model_request") {
+          const id = message.id;
+          if (engine !== "browser-use" || typeof id !== "string") throw new Error("Unexpected Browser Use model request");
+          try {
+            const completion = await generateBrowserUseCompletion(message, ctx, signal);
+            writeMessage(child, { type: "model_response", id, ...completion });
+          } catch (error) {
+            writeMessage(child, { type: "model_response", id, error: error instanceof Error ? error.message : String(error) });
+          }
         } else if (message.type === "result") {
           // SAFETY: The Python bridge constructs this result shape; required fields are validated before formatting.
           result = message as unknown as BrowserResult;
@@ -173,12 +259,12 @@ async function runBrowser(
       }
     });
     if (childError) throw childError;
-    if (signal.aborted) throw new Error("Jev browser automation was cancelled");
-    if (terminating && !protocolError) throw new Error(`Jev browser automation exceeded ${params.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS} seconds`);
+    if (signal.aborted) throw new Error(`${engine} browser automation was cancelled`);
+    if (terminating && !protocolError) throw new Error(`${engine} browser automation exceeded ${params.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS} seconds`);
     if (protocolError) throw protocolError;
     if (exitCode !== 0 || !result) {
       const diagnostic = boundedError(stderr);
-      throw new Error(`Jev browser exited with code ${exitCode}${diagnostic ? `: ${diagnostic}` : ""}`);
+      throw new Error(`${engine} browser exited with code ${exitCode}${diagnostic ? `: ${diagnostic}` : ""}`);
     }
     return result;
   } finally {
@@ -190,28 +276,57 @@ async function runBrowser(
   }
 }
 
-function formatResult(result: BrowserResult): string {
+function formatResult(result: BrowserResult, engine: BrowserEngine): string {
   const actions = (result.actions ?? []).slice(-20).map((item) => `${item.step ?? "?"}. ${item.kind ?? "action"}: ${item.action ?? ""}${item.text ? ` → ${item.text}` : ""}`).join("\n");
-  const models = result.text_models?.length ? result.text_models.join(", ") : "none (no text fields required)";
+  const model = result.model ?? (result.text_models?.length ? result.text_models.join(", ") : "none");
+  const errors = (result.errors ?? []).slice(-10).join("\n");
   return [
-    `Browser automation ${result.status}.`,
+    `Browser automation ${result.status} (engine: ${engine}).`,
     `Final URL: ${result.url}`,
     result.title ? `Title: ${result.title}` : "",
     `Elapsed: ${result.elapsed_ms ?? "unknown"} ms`,
-    `Text helper: ${models}`,
+    `Model: ${model}`,
+    result.final_result ? `Final result:\n${result.final_result}` : "",
     actions ? `Actions:\n${actions}` : "Actions: none",
+    errors ? `Errors:\n${errors}` : "",
     result.page_text ? `Visible page text:\n${result.page_text}` : "",
-    "Warning: Jev DONE means the page appeared complete; it is not independent outcome verification.",
+    `Warning: ${engine === "jev" ? "Jev DONE" : "Browser Use completion"} reflects the agent's assessment; it is not independent outcome verification.`,
   ].filter(Boolean).join("\n");
 }
 
 export default function jevBrowser(pi: ExtensionAPI): void {
+  pi.registerCommand("browser-session-import", {
+    description: "Confirm and import the current Chrome session into isolated Playwright Chromium",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) throw new Error("Session import requires interactive confirmation");
+      const confirmed = await ctx.ui.confirm(
+        "Import Chrome session?",
+        "This copies Chrome cookies and origin storage into the isolated automation profile. The export is stored locally with mode 0600 and is never committed.",
+      );
+      if (!confirmed) {
+        ctx.ui.notify("Chrome session import cancelled", "info");
+        return;
+      }
+      try {
+        const result = await exec(process.execPath, [join(EXTENSION_DIR, "session-import.mjs")]);
+        const uid = process.getuid?.();
+        if (uid === undefined) throw new Error("Session import requires a Unix launchd environment");
+        const service = `gui/${uid}/com.pikachu.jev-browser`;
+        await exec("/bin/launchctl", ["kickstart", "-k", service]);
+        ctx.ui.notify(result.stdout.trim() || "Chrome session imported", "info");
+      } catch (error) {
+        ctx.ui.notify(`Session import failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    },
+  });
+
   pi.registerTool({
     name: "browser_use",
-    label: "Jev Browser Automation",
-    description: "Operate an interactive website with Jev Ultrafast. Use browser_use for clicking, typing, selecting, scrolling, and navigating—not for web research or URL fetching. Browser actions can have real external side effects; obtain explicit user confirmation before consequential actions.",
+    label: "Browser Automation",
+    description: "Operate an interactive website with Browser Use by default, or Jev Ultrafast with engine=jev. Use for clicking, typing, selecting, scrolling, and navigating—not research or URL fetching. Obtain explicit user confirmation before consequential actions.",
     parameters: BrowserParams,
     promptGuidelines: [
+      "browser_use defaults to Browser Use for broader long-horizon workflows; select engine=jev for a lower-overhead indexed-DOM action loop.",
       "Use browser_use only for interactive browser automation; prefer web_search and fetch_content for research and retrieval.",
       "Give browser_use one narrow goal with a visibly verifiable outcome, and do not use it for consequential actions without explicit user confirmation.",
     ],
@@ -219,12 +334,20 @@ export default function jevBrowser(pi: ExtensionAPI): void {
       if (isPlanMode(ctx.sessionManager.getBranch())) {
         return { content: [{ type: "text", text: "browser_use is disabled while read-only plan mode is active." }], details: {}, isError: true };
       }
+      if (browserInUse) {
+        return { content: [{ type: "text", text: "browser_use is already operating the shared browser tab; wait for that run to finish." }], details: {}, isError: true };
+      }
+      browserInUse = true;
       try {
-        const result = await runBrowser(params as BrowserParamsValue, signal ?? new AbortController().signal, onUpdate, ctx);
-        return { content: [{ type: "text", text: formatResult(result) }], details: result };
+        const typedParams = params as BrowserParamsValue;
+        const engine = selectEngine(typedParams.engine);
+        const result = await runBrowser(typedParams, signal ?? new AbortController().signal, onUpdate, ctx);
+        return { content: [{ type: "text", text: formatResult(result, engine) }], details: { ...result, engine } };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [{ type: "text", text: `browser_use failed: ${message}` }], details: { error: message }, isError: true };
+      } finally {
+        browserInUse = false;
       }
     },
   });

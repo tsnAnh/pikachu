@@ -35,7 +35,7 @@ export function routeTarget(tier: RouteTier): { id: string; thinking: "low" | "m
 
 export const SPECIALIST_GROUPS: Record<SpecialistGroup, { label: string; keywords: string[] }> = {
   browser: {
-    label: "interactive browser automation",
+    label: "interactive browser automation (Browser Use default; Jev fallback)",
     keywords: ["browser automation", "browser use", "interact", "click", "fill form", "navigate", "operate website"],
   },
   web: {

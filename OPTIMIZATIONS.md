@@ -18,7 +18,7 @@ The resulting rule is one owner per concern:
 | Delegation | Herdr or pi-subagents, selected per session |
 | Review | pi-subagents' maintained parallel-review prompt |
 | Web research | pi-web-access |
-| Browser automation | Complete pinned Jev Ultrafast checkout plus a narrow Pi/Sol-low adapter |
+| Browser automation | Complete pinned Browser Use default with Pi model bridge; complete pinned Jev fallback |
 | Safety | cc-safety-net standard policy |
 | Context inspection | Local `/context` command |
 
@@ -51,14 +51,20 @@ OMP itself and the unrelated open-catalog `oh-my-pi` skill are not installed.
 
 - Every npm package is pinned to an exact version and the external design skill to a commit SHA.
 - `TYPESAFE_API_KEY` is environment-only.
-- Jev Ultrafast is deployed as a complete checkout pinned to Git commit
-  `1231850a0bf1a0c0341fe408ef1668dbbfdfac46`; `uv sync --frozen` honors upstream's lockfile, and
-  the generated checkout and virtual environment remain ignored.
+- Browser Use is deployed as a complete checkout pinned to Git commit
+  `d8110c5ff87ccba887aaa726cdb780f2f84bef8d`; Jev Ultrafast is independently pinned to
+  `1231850a0bf1a0c0341fe408ef1668dbbfdfac46`. Both use frozen upstream `uv.lock` files, and
+  generated checkouts and virtual environments remain ignored.
 - A tracked generic navigation-settle patch waits for a changed URL/title and a ready document after
   link clicks; setup reapplies it deterministically to the pinned checkout.
-- Browser operation/target choices receive only the TypeSafe key. Field text uses Pi's configured
-  `openai-codex/gpt-5.6-sol` provider at low reasoning without exporting provider credentials.
-- Jev calls use bounded timeouts, no retries, and deterministic fallbacks.
+- Browser Use sends bounded messages, images, and schemas over JSONL to Pi's configured
+  `openai-codex/gpt-5.6-sol` provider at low reasoning; structured responses are validated in
+  TypeScript and again by Pydantic. Credentials are never exported to Python and Cloud is disabled.
+  Jev operation/target choices receive only the TypeSafe key; its field text uses the same Pi model bridge.
+- Normal automation uses a pinned CloakBrowser custom Chromium profile and never attaches to Chrome. Chrome
+  session export is command-triggered, confirmation-gated, stored outside the repository with mode
+  `0600`, and loaded only into the isolated automation profile.
+- Both browser engines use bounded deadlines, one shared mutex, and no silent model or engine fallback.
 - Plain custom session entries hold todo/routing/tool/delegation state and are not sent to the LLM.
 - Deployment copies only repo-owned files, backs up replacements, and preserves unknown live data.
 - `agent/auth.json`, session history, installed packages, and runtime credential stores remain

@@ -3,6 +3,30 @@ export const TEXT_MODEL_ID = "gpt-5.6-sol";
 export const MAX_FIELD_TEXT = 2_000;
 export const MAX_STDERR = 4_000;
 
+export const BROWSER_USE_MODEL = `${TEXT_MODEL_PROVIDER}/${TEXT_MODEL_ID}`;
+export const MAX_MODEL_MESSAGES = 80;
+export const MAX_MODEL_TEXT = 500_000;
+export const MAX_MODEL_IMAGE = 5_000_000;
+export const MAX_MODEL_SCHEMA = 100_000;
+export const MAX_MODEL_RESPONSE = 200_000;
+
+export type BrowserEngine = "browser-use" | "jev";
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+export function selectEngine(value: unknown): BrowserEngine {
+  if (value === undefined || value === "browser-use") return "browser-use";
+  if (value === "jev") return "jev";
+  throw new Error('engine must be "browser-use" or "jev"');
+}
+
+export function parseModelJson(raw: string, max = MAX_MODEL_RESPONSE): JsonValue {
+  if (raw.length > max) throw new Error(`Model response exceeded ${max} characters`);
+  try {
+    return JSON.parse(raw) as JsonValue;
+  } catch {
+    throw new Error("Browser Use model returned invalid JSON");
+  }
+}
 export interface BridgeMessage {
   type: string;
   [key: string]: unknown;
@@ -52,8 +76,9 @@ export function isPlanMode(entries: readonly unknown[]): boolean {
   return enabled;
 }
 
-export function safeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const allowed = ["HOME", "PATH", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "DISPLAY", "XDG_RUNTIME_DIR", "TYPESAFE_API_KEY", "TYPESAFE_MODEL"];
+export function safeEnvironment(source: NodeJS.ProcessEnv, includeTypesafe = true): NodeJS.ProcessEnv {
+  const allowed = ["HOME", "PATH", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "DISPLAY", "XDG_RUNTIME_DIR"];
+  if (includeTypesafe) allowed.push("TYPESAFE_API_KEY", "TYPESAFE_MODEL");
   return Object.fromEntries(allowed.flatMap((key) => (source[key] === undefined ? [] : [[key, source[key]]])));
 }
 

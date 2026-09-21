@@ -142,9 +142,9 @@ sync_directory() {
   [ -d "$source" ] || return 0
   local destination="$TARGET_AGENT/$relative"
   if [ -d "$destination" ] &&
-    diff -qr --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
+    diff -qr --exclude node_modules --exclude .venv --exclude .upstream --exclude .browser-use-upstream --exclude __pycache__ --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
   backup_path "$relative"; mkdir -p "$destination"
-  rsync -a --delete --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store "$source/" "$destination/" ||
+  rsync -a --delete --exclude node_modules --exclude .venv --exclude .upstream --exclude .browser-use-upstream --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store "$source/" "$destination/" ||
     die "Failed to sync $relative"
   ok "synced $relative"
 }
@@ -188,19 +188,80 @@ git -C "$JEV_ULTRAFAST_DIR" checkout --detach --force "$JEV_ULTRAFAST_REF" >/dev
   die "Failed to check out pinned Jev Ultrafast commit"
 git -C "$JEV_ULTRAFAST_DIR" clean -fd >/dev/null 2>&1 || die "Failed to clean Jev Ultrafast checkout"
 [ "$(git -C "$JEV_ULTRAFAST_DIR" rev-parse HEAD)" = "$JEV_ULTRAFAST_REF" ] || die "Jev Ultrafast checkout verification failed"
-git -C "$JEV_ULTRAFAST_DIR" apply "$JEV_BROWSER_DIR/patches/navigation-settle.patch" ||
+git -C "$JEV_ULTRAFAST_DIR" apply --unidiff-zero "$JEV_BROWSER_DIR/patches/navigation-settle.patch" ||
   die "Failed to apply Jev Ultrafast navigation-settle patch"
 uv sync --frozen --no-dev --project "$JEV_ULTRAFAST_DIR" --quiet
 "$JEV_BROWSER_PYTHON" -c 'import jev_ultrafast; import browser_harness' || die "Jev browser runtime import check failed"
 ok "complete jev-ultrafast checkout @ $JEV_ULTRAFAST_REF"
-if ! "$JEV_BROWSER_PYTHON" -c 'from browser_harness.admin import ensure_daemon; ensure_daemon()' >/dev/null 2>&1; then
-  if [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ]; then
-    warn "Browser Harness is installed but Chrome remote debugging is unavailable; browser_use will remain unavailable until Chrome is configured"
+
+
+bold "Installing complete Browser Use checkout"
+BROWSER_USE_REF="d8110c5ff87ccba887aaa726cdb780f2f84bef8d"
+BROWSER_USE_DIR="$JEV_BROWSER_DIR/.browser-use-upstream"
+BROWSER_USE_PYTHON="$BROWSER_USE_DIR/.venv/bin/python"
+if [ ! -d "$BROWSER_USE_DIR/.git" ]; then
+  rm -rf "$BROWSER_USE_DIR"
+  git clone --no-checkout --filter=blob:none https://github.com/browser-use/browser-use.git "$BROWSER_USE_DIR" >/dev/null 2>&1 ||
+    die "Failed to clone Browser Use"
+fi
+git -C "$BROWSER_USE_DIR" fetch --depth 1 origin "$BROWSER_USE_REF" >/dev/null 2>&1 || die "Failed to fetch pinned Browser Use commit"
+git -C "$BROWSER_USE_DIR" checkout --detach --force "$BROWSER_USE_REF" >/dev/null 2>&1 || die "Failed to check out pinned Browser Use commit"
+git -C "$BROWSER_USE_DIR" clean -fd >/dev/null 2>&1 || die "Failed to clean Browser Use checkout"
+[ "$(git -C "$BROWSER_USE_DIR" rev-parse HEAD)" = "$BROWSER_USE_REF" ] || die "Browser Use checkout verification failed"
+cp "$JEV_BROWSER_DIR/browser-use.uv.lock" "$BROWSER_USE_DIR/uv.lock" || die "Failed to install reviewed Browser Use lockfile"
+uv sync --frozen --no-dev --python 3.12 --project "$BROWSER_USE_DIR" --quiet
+"$BROWSER_USE_PYTHON" -c 'from browser_use import Agent, BrowserSession; from browser_use.llm.base import BaseChatModel' || die "Browser Use runtime import check failed"
+ok "complete browser-use checkout @ $BROWSER_USE_REF"
+bold "Installing bundled CloakBrowser"
+"$JEV_BROWSER_DIR/node_modules/.bin/cloakbrowser" install >/dev/null
+ok "CloakBrowser binary"
+BUNDLED_BROWSER_URL="http://127.0.0.1:9223"
+DEFAULT_LIVE_AGENT="$HOME/.pi/agent"
+if [ "$TARGET_AGENT" = "$DEFAULT_LIVE_AGENT" ]; then
+  BROWSER_STATE_DIR="$HOME/.local/share/pikachu/jev-browser"
+  BROWSER_LOG_DIR="$HOME/.cache/pikachu"
+  LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.pikachu.jev-browser.plist"
+  mkdir -p "$BROWSER_STATE_DIR" "$BROWSER_LOG_DIR" "$(dirname "$LAUNCH_AGENT")"
+  chmod 700 "$BROWSER_STATE_DIR"
+  node - "$LAUNCH_AGENT" "$(command -v node)" "$JEV_BROWSER_DIR/chromium-host.mjs" "$BROWSER_STATE_DIR" "$BROWSER_LOG_DIR" <<'NODE'
+const fs = require("node:fs");
+const [plist, node, script, state, logs] = process.argv.slice(2);
+const esc = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.pikachu.jev-browser</string>
+<key>ProgramArguments</key><array><string>${esc(node)}</string><string>${esc(script)}</string></array>
+<key>EnvironmentVariables</key><dict>
+<key>JEV_BROWSER_STATE_DIR</key><string>${esc(state)}</string>
+<key>JEV_BROWSER_CDP_PORT</key><string>9223</string>
+</dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>${esc(logs)}/jev-browser.log</string>
+<key>StandardErrorPath</key><string>${esc(logs)}/jev-browser-error.log</string>
+</dict></plist>\n`;
+fs.writeFileSync(plist, xml, { mode: 0o600 });
+NODE
+  launchctl bootout "gui/$(id -u)/com.pikachu.jev-browser" >/dev/null 2>&1 || true
+  for _ in $(seq 1 50); do
+    launchctl print "gui/$(id -u)/com.pikachu.jev-browser" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT" >/dev/null
+  for _ in $(seq 1 50); do curl -fsS "$BUNDLED_BROWSER_URL/json/version" >/dev/null 2>&1 && break; sleep 0.1; done
+  curl -fsS "$BUNDLED_BROWSER_URL/json/version" >/dev/null 2>&1 || die "CloakBrowser did not expose CDP on port 9223"
+  ok "persistent CloakBrowser"
+else
+  warn "Bundled Chromium LaunchAgent is installed only for the live ~/.pi/agent profile"
+fi
+if ! BU_NAME=pikachu-chromium BU_CDP_URL="$BUNDLED_BROWSER_URL" "$JEV_BROWSER_PYTHON" -c 'from browser_harness.admin import ensure_daemon; ensure_daemon()' >/dev/null 2>&1; then
+  if [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ] || [ "$TARGET_AGENT" != "$DEFAULT_LIVE_AGENT" ]; then
+    warn "Bundled Chromium is installed but its Browser Harness daemon is not active"
   else
-    die "Browser Harness could not connect to Chrome; enable chrome://inspect/#remote-debugging, then run '$JEV_ULTRAFAST_DIR/.venv/bin/browser-harness --doctor'"
+    die "Browser Harness could not connect to CloakBrowser at $BUNDLED_BROWSER_URL"
   fi
 else
-  ok "Browser Harness can connect to Chrome"
+  ok "Browser Harness connected to CloakBrowser without Chrome permission prompts"
 fi
 
 bold "Materializing exact npm package set"

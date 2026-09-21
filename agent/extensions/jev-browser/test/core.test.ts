@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boundedError, isPlanMode, MAX_FIELD_TEXT, parseBridgeLine, parseTextModelOutput, safeEnvironment } from "../src/core.js";
+import { boundedError, isPlanMode, MAX_FIELD_TEXT, parseBridgeLine, parseModelJson, parseTextModelOutput, safeEnvironment, selectEngine } from "../src/core.js";
 
 test("strict Sol text accepts only one non-empty bounded text property", () => {
   assert.equal(parseTextModelOutput('{"text":"Zurich"}'), "Zurich");
@@ -27,6 +27,20 @@ test("plan mode follows the latest valid persisted state", () => {
 test("subprocess environment excludes unrelated credentials", () => {
   const env = safeEnvironment({ HOME: "/tmp/home", PATH: "/bin", TYPESAFE_API_KEY: "typesafe", OPENAI_API_KEY: "secret" });
   assert.deepEqual(env, { HOME: "/tmp/home", PATH: "/bin", TYPESAFE_API_KEY: "typesafe" });
+  assert.deepEqual(safeEnvironment({ HOME: "/tmp/home", TYPESAFE_API_KEY: "typesafe" }, false), { HOME: "/tmp/home" });
+});
+
+test("engine dispatch defaults to Browser Use and validates explicit engines", () => {
+  assert.equal(selectEngine(undefined), "browser-use");
+  assert.equal(selectEngine("browser-use"), "browser-use");
+  assert.equal(selectEngine("jev"), "jev");
+  assert.throws(() => selectEngine("chrome"), /engine must be/);
+});
+
+test("Browser Use model JSON is strict and bounded", () => {
+  assert.deepEqual(parseModelJson('{"ok":true}'), { ok: true });
+  assert.throws(() => parseModelJson("not-json"), /invalid JSON/);
+  assert.throws(() => parseModelJson("1234", 3), /exceeded/);
 });
 
 test("diagnostics are bounded", () => {

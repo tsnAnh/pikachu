@@ -2,12 +2,15 @@
   "name": "pi-cfg-jev-browser",
   "version": "1.0.0",
   "private": true,
+  "description": "Persistent CloakBrowser automation with Browser Use default and Jev fallback",
   "type": "module",
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "cloakbrowser": "0.5.10",
+    "playwright-core": "1.63.0",
     "typebox": "1.1.38"
   },
   "devDependencies": {

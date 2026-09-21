@@ -36,6 +36,8 @@ agent/extensions/**/*.lock
 
 agent/extensions/**/.venv/
 agent/extensions/**/.upstream/
+agent/extensions/**/.browser-use-upstream/
+!agent/extensions/jev-browser/browser-use.uv.lock
 agent/extensions/**/__pycache__/
 agent/extensions/**/*.pyc
 # ── OS
