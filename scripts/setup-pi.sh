@@ -7,6 +7,7 @@ SOURCE_AGENT="$REPO_ROOT/agent"
 TARGET_AGENT="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 bold() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok() { printf '    \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
 while [ "$#" -gt 0 ]; do
@@ -36,6 +37,36 @@ PI_BIN="$(resolve_pi_bin || true)"
 NODE_VERSION="$(node --version | sed 's/^v//')"
 node -e 'const [a,b]=process.versions.node.split(".").map(Number);if(a<22||(a===22&&b<19))process.exit(1)' ||
   die "node $NODE_VERSION is too old; Node >=22.19 is required"
+
+bold "Configuring TypeSafe"
+KEYCHAIN_SERVICE="pikachu.typesafe-api-key"
+KEYCHAIN_ACCOUNT="${USER:-$(id -un)}"
+if [ -n "${TYPESAFE_API_KEY:-}" ]; then
+  ok "TYPESAFE_API_KEY is available from the environment"
+elif command -v security >/dev/null 2>&1 &&
+  STORED_TYPESAFE_KEY="$(security find-generic-password -a "$KEYCHAIN_ACCOUNT" -s "$KEYCHAIN_SERVICE" -w 2>/dev/null)" &&
+  [ -n "$STORED_TYPESAFE_KEY" ]; then
+  export TYPESAFE_API_KEY="$STORED_TYPESAFE_KEY"
+  unset STORED_TYPESAFE_KEY
+  ok "TYPESAFE_API_KEY loaded from macOS Keychain"
+elif [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ] || [ ! -t 0 ]; then
+  warn "TYPESAFE_API_KEY is not configured; Jev will use deterministic and native Pi fallbacks"
+elif command -v security >/dev/null 2>&1; then
+  printf '    Enter TYPESAFE_API_KEY (hidden, Enter to skip): '
+  IFS= read -r -s TYPESAFE_KEY_INPUT
+  printf '\n'
+  if [ -n "$TYPESAFE_KEY_INPUT" ]; then
+    security add-generic-password -a "$KEYCHAIN_ACCOUNT" -s "$KEYCHAIN_SERVICE" -w "$TYPESAFE_KEY_INPUT" -U >/dev/null ||
+      die "Failed to save TYPESAFE_API_KEY in macOS Keychain"
+    export TYPESAFE_API_KEY="$TYPESAFE_KEY_INPUT"
+    unset TYPESAFE_KEY_INPUT
+    ok "TYPESAFE_API_KEY saved in macOS Keychain"
+  else
+    warn "Skipped; Jev will use deterministic and native Pi fallbacks"
+  fi
+else
+  warn "Set TYPESAFE_API_KEY in the environment before setup; no supported secure credential store was found"
+fi
 
 bold "Validating repository configuration"
 for file in settings.json jev.json zentui.json; do

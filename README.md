@@ -160,7 +160,13 @@ cd pikachu
 scripts/setup-pi.sh
 ```
 
-Optionally export the TypeSafe credential from your shell or secret manager:
+If `TYPESAFE_API_KEY` is not already available, interactive setup asks for it using a hidden
+prompt. On macOS, a non-empty value is stored in Keychain under `pikachu.typesafe-api-key`; the
+preflight launcher reads it into Pi's environment at startup. The key is never written to this
+repository, Pi configuration, logs, or session files. Press Enter to skip it and retain the normal
+fallback behavior.
+
+You can also provide the key from your shell or another secret manager before setup:
 
 ```bash
 export TYPESAFE_API_KEY="..."
@@ -168,6 +174,12 @@ export TYPESAFE_API_KEY="..."
 
 Without the key, Pi still starts normally. Jev-dependent decisions use deterministic or native Pi
 fallbacks.
+
+To remove the macOS Keychain entry:
+
+```bash
+security delete-generic-password -a "$USER" -s "pikachu.typesafe-api-key"
+```
 
 Setup validates JSON, package pins, Node and Pi availability, and local extension lockfiles before
 deploying. It synchronizes only repository-owned files to `~/.pi/agent`, backs up replaced files,

@@ -21,6 +21,19 @@ INTERVAL_SECONDS="${PI_AUTO_UPDATE_INTERVAL_SECONDS:-0}"
 
 warn() { printf '\033[33mPi preflight: %s\033[0m\n' "$1" >&2; }
 
+load_typesafe_key() {
+  [ -z "${TYPESAFE_API_KEY:-}" ] || return 0
+  command -v security >/dev/null 2>&1 || return 0
+  local account stored_key
+  account="${USER:-$(id -un)}"
+  stored_key="$(security find-generic-password -a "$account" -s "pikachu.typesafe-api-key" -w 2>/dev/null || true)"
+  [ -n "$stored_key" ] || return 0
+  export TYPESAFE_API_KEY="$stored_key"
+  unset stored_key
+}
+
+load_typesafe_key
+
 resolve_real_pi() {
   local directory candidate
   local old_ifs="$IFS"
