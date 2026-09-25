@@ -3,10 +3,11 @@
 agent/*
 !agent/settings.json
 !agent/mcp.json
-!agent/jev.json
 !agent/models.json
 !agent/zentui.json
+!agent/android-automator.json
 !agent/AGENTS.md
+!agent/browser-group/
 !agent/extensions/
 !agent/skills/
 !agent/prompts/
@@ -36,8 +37,6 @@ agent/extensions/**/*.lock
 
 agent/extensions/**/.venv/
 agent/extensions/**/.upstream/
-agent/extensions/**/.browser-use-upstream/
-!agent/extensions/jev-browser/browser-use.uv.lock
 agent/extensions/**/__pycache__/
 agent/extensions/**/*.pyc
 # ── OS

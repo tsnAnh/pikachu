@@ -9,6 +9,14 @@
       "url": "https://mcp.revenuecat.ai/mcp",
       "auth": "oauth",
       "lifecycle": "lazy"
+    },
+    "jev-android": {
+      "command": "pikachu-jev-android-mcp",
+      "lifecycle": "lazy",
+      "idleTimeout": 10,
+      "requestTimeoutMs": 300000,
+      "directTools": true,
+      "toolPrefix": "server"
     }
   }
 }

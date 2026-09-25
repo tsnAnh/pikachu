@@ -20,6 +20,7 @@ LOG_FILE="$STATE_DIR/update.log"
 INTERVAL_SECONDS="${PI_AUTO_UPDATE_INTERVAL_SECONDS:-0}"
 
 warn() { printf '\033[33mPi preflight: %s\033[0m\n' "$1" >&2; }
+progress() { printf 'Pi preflight: %s\n' "$1" >&2; }
 
 load_typesafe_key() {
   [ -z "${TYPESAFE_API_KEY:-}" ] || return 0
@@ -33,6 +34,27 @@ load_typesafe_key() {
 }
 
 load_typesafe_key
+
+check_cua_runtime() {
+  progress "Checking CUA Driver and Chrome bridge"
+  if ! command -v cua-driver >/dev/null 2>&1; then warn "CUA unavailable: install Cua Driver 0.28.2 or newer"; return 0; fi
+  local version permissions tools bridge_socket manifest version_ok
+  version="$(cua-driver --version 2>/dev/null | awk '{print $2}')"
+  version_ok="$(node -e 'const [a,b,p]=process.argv[1].split(".").map(Number);process.stdout.write(a>0||b>28||(b===28&&p>=2)?"yes":"no")' "$version" 2>/dev/null || printf no)"
+  if [ "$version_ok" != "yes" ]; then warn "CUA unavailable: Cua Driver >=0.28.2 is required (found ${version:-unknown})"; return 0; fi
+  if ! cua-driver status >/dev/null 2>&1; then warn "CUA unavailable: start the CuaDriver app daemon"; return 0; fi
+  permissions="$(cua-driver permissions status --json 2>/dev/null || true)"
+  if ! printf '%s' "$permissions" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);process.exit(v.accessibility&&v.screen_recording?0:1)}catch{process.exit(1)}})' ; then
+    warn "CUA unavailable: grant Accessibility and Screen Recording to CuaDriver"; return 0
+  fi
+  tools="$(cua-driver list-tools 2>/dev/null || true)"
+  if ! printf '%s' "$tools" | grep -q 'set_agent_cursor_enabled'; then warn "CUA unavailable: this Driver build lacks the agent cursor overlay"; return 0; fi
+  bridge_socket="$HOME/.pi/agent/browser-group.sock"
+  manifest="$HOME/.pi/agent/browser-group/extension/manifest.json"
+  if [ ! -f "$manifest" ]; then warn "CUA browser unavailable: run scripts/setup-pi.sh"; return 0; fi
+  if [ ! -S "$bridge_socket" ] || ! node "$HOME/.pi/agent/browser-group/check-bridge.mjs" >/dev/null 2>&1; then warn "CUA browser unavailable: reload Pikachu Browser Use from ~/.pi/agent/browser-group/extension in Chrome; the expected handshake is not active"; return 0; fi
+  progress "CUA ready: Driver $version, permissions, cursor overlay, and Chrome bridge"
+}
 
 resolve_real_pi() {
   local directory candidate
@@ -70,6 +92,7 @@ for argument in "$@"; do
 done
 
 if [ "$SKIP_UPDATE" = "0" ] || [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ]; then
+  check_cua_runtime
   exec "$REAL_PI" "${FORWARDED_ARGS[@]}"
 fi
 
@@ -130,47 +153,58 @@ if [ "$update_due" -eq 1 ]; then
 
     : > "$LOG_FILE"
     chmod 600 "$LOG_FILE" 2>/dev/null || true
-    printf 'Pi preflight: updating CLI, config, extensions, and models… '
+    exec 3>&2
+    progress "Checking configuration checkout"
 
     refresh_status=0
     if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
         printf '%s\n' "Config checkout has local changes; skipped Git refresh." >> "$LOG_FILE"
+        progress "Local config changes found; skipping Git refresh"
       else
         upstream="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
         if [ -n "$upstream" ]; then
           remote="${upstream%%/*}"
-          if ! git -C "$REPO_ROOT" fetch --quiet "$remote" >> "$LOG_FILE" 2>&1 ||
-             ! git -C "$REPO_ROOT" merge --ff-only "$upstream" >> "$LOG_FILE" 2>&1; then
+          progress "Fetching config updates"
+          if ! git -C "$REPO_ROOT" fetch --quiet "$remote" >> "$LOG_FILE" 2>&1; then
             refresh_status=1
+          else
+            progress "Applying config fast-forward"
+            if ! git -C "$REPO_ROOT" merge --ff-only "$upstream" >> "$LOG_FILE" 2>&1; then refresh_status=1; fi
           fi
         else
           printf '%s\n' "Config checkout has no upstream; skipped Git refresh." >> "$LOG_FILE"
+          progress "No config upstream; skipping Git refresh"
         fi
       fi
+    else
+      progress "Git checkout unavailable; using local config"
     fi
 
     update_status=0
-    PI_CFG_REAL_PI="$REAL_PI" PI_CFG_UPDATE_RUNNING=1 \
+    PI_CFG_REAL_PI="$REAL_PI" PI_CFG_UPDATE_RUNNING=1 PI_CFG_PROGRESS_FD=3 \
       "$REPO_ROOT/scripts/update-pi.sh" >> "$LOG_FILE" 2>&1 || update_status=$?
 
     if [ "$update_status" -eq 0 ]; then
       if [ "$refresh_status" -eq 0 ]; then date +%s > "$STAMP_FILE"; fi
       if [ "$refresh_status" -eq 0 ]; then
-        printf '\033[32mdone\033[0m\n'
+        progress "Ready"
       else
-        printf '\033[33mdone (config Git refresh failed)\033[0m\n'
+        progress "Ready with existing config (Git refresh failed)"
         warn "details: $LOG_FILE"
       fi
     else
-      printf '\033[33mfailed\033[0m\n'
+      progress "Update failed; starting the current installation"
       warn "using the current installation; details: $LOG_FILE"
     fi
 
+    exec 3>&-
     cleanup_lock
     trap - EXIT HUP INT TERM
   fi
 fi
+
+check_cua_runtime
 
 # A self-update can replace the executable, so resolve it again immediately before launch.
 REAL_PI="$(resolve_real_pi || true)"

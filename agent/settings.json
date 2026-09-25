@@ -8,12 +8,6 @@
     "titox/titox/deepseek-v4-flash"
   ],
   "packages": [
-    {
-      "source": "npm:@alexlikevibe/pi-jev@0.2.1",
-      "extensions": [
-        "extensions/compaction.ts"
-      ]
-    },
     "npm:pi-zentui@0.25.0",
     "npm:cc-safety-net@2.4.4",
     "npm:pi-subagents@0.70.0",

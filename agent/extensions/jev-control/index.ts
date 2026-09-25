@@ -1,3 +1,6 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { choice, noul, score, TypeSafeClient } from "@typesafe-ai/sdk";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -15,13 +18,19 @@ import {
   isSpecialistGroup,
   normalizePriority,
   readyTodos,
+  requiredSpecialistGroups,
   routeTarget,
   shortlistGroups,
+  specialistGroupForTool,
   type ControlState,
   type SpecialistGroup,
   type TodoItem,
   type TodoStatus,
 } from "./src/core.js";
+import { chooseBoundedAction } from "./src/jev-use.js";
+import { protectCuaToolCall } from "./src/cua-focus.js";
+import { cuaWindowHandles } from "./src/cua-observation.js";
+import { isForegroundAllowed, setForegroundAllowed } from "./src/focus-state.js";
 
 const STATE_ENTRY = "pi-cfg-jev-control-v1";
 const ROUTE_CONFIDENCE = 0.65;
@@ -29,6 +38,39 @@ const TOOL_CONFIDENCE = 0.65;
 const ROUTE_TIMEOUT_MS = 10_000;
 const TODO_TIMEOUT_MS = 15_000;
 
+const LAST_MODEL_PATH = join(homedir(), ".local", "share", "pikachu", "last-model.json");
+
+interface RememberedModel {
+  version: 1;
+  provider: string;
+  id: string;
+}
+
+function parseRememberedModel(raw: string): RememberedModel {
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("remembered model must be an object");
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || typeof record.provider !== "string" || !record.provider || typeof record.id !== "string" || !record.id) {
+    throw new Error("remembered model is invalid");
+  }
+  return { version: 1, provider: record.provider, id: record.id };
+}
+
+async function saveRememberedModel(model: RememberedModel): Promise<void> {
+  await mkdir(dirname(LAST_MODEL_PATH), { recursive: true, mode: 0o700 });
+  const temporary = `${LAST_MODEL_PATH}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(model)}\n`, { mode: 0o600 });
+  await rename(temporary, LAST_MODEL_PATH);
+}
+
+async function loadRememberedModel(): Promise<RememberedModel | undefined> {
+  try {
+    return parseRememberedModel(await readFile(LAST_MODEL_PATH, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return undefined;
+  }
+}
 const TodoParams = Type.Object({
   action: StringEnum(["list", "add", "update", "complete", "remove", "next", "review"] as const),
   id: Type.Optional(Type.String({ description: "Stable todo ID, for example T3" })),
@@ -43,6 +85,17 @@ const TodoParams = Type.Object({
 const FindToolsParams = Type.Object({
   query: Type.String({ description: "Capability needed for the next work, stated in plain language" }),
 });
+
+const JevChoiceParams = Type.Object({
+  goal: Type.String({ minLength: 1, maxLength: 1000 }),
+  observation: Type.String({ minLength: 1, maxLength: 5000, description: "Compact fresh Cua Driver semantic observation; omit secrets and screenshot bytes" }),
+  captureId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  history: Type.Optional(Type.Array(Type.String({ maxLength: 500 }), { maxItems: 6 })),
+  candidates: Type.Array(Type.Object({
+    id: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" }),
+    description: Type.String({ minLength: 1, maxLength: 240 }),
+  }, { additionalProperties: false }), { minItems: 2, maxItems: 32 }),
+}, { additionalProperties: false });
 
 interface TodoAdvisory {
   orderedIds: string[];
@@ -68,15 +121,6 @@ function formatTodo(todo: TodoItem): string {
   const marker = todo.status === "completed" ? "✓" : todo.status === "blocked" ? "×" : todo.status === "in_progress" ? "▶" : "○";
   const deps = todo.blockedBy.length ? ` depends:${todo.blockedBy.join(",")}` : "";
   return `${marker} ${todo.id} [p${todo.priority}] ${todo.title}${deps}`;
-}
-
-function toolGroup(name: string, source: string): SpecialistGroup | undefined {
-  const value = `${name} ${source}`.toLowerCase();
-  if (name === "browser_use" || value.includes("jev-browser")) return "browser";
-  if (value.includes("pi-web-access") || ["web_search", "fetch_content", "source_check", "get_search_content"].includes(name)) return "web";
-  if (value.includes("pi-lens")) return "code";
-  if (value.includes("pi-mcp-adapter") || name === "mcp" || name.startsWith("mcp_")) return "mcp";
-  return undefined;
 }
 
 class TodoPanel {
@@ -106,6 +150,7 @@ export default function jevControl(pi: ExtensionAPI): void {
   let state: ControlState = initialState();
   let advisory: TodoAdvisory = { orderedIds: [], messages: [] };
   let internalModelTarget: string | undefined;
+  let restoreRememberedOnNextPrompt = false;
 
   const persist = (): void => pi.appendEntry(STATE_ENTRY, copyState(state));
 
@@ -116,7 +161,8 @@ export default function jevControl(pi: ExtensionAPI): void {
         state = copyState(entry.data);
       }
     }
-    state.activeGroups = state.activeGroups.filter((group) => isSpecialistGroup(group));
+    const savedGroups = state.activeGroups as string[];
+    state.activeGroups = [...new Set(savedGroups.map((group) => group === "browser" ? "computer" : group).filter(isSpecialistGroup))];
   };
 
   const groupTools = (): Map<SpecialistGroup, string[]> => {
@@ -124,8 +170,14 @@ export default function jevControl(pi: ExtensionAPI): void {
     for (const name of Object.keys(SPECIALIST_GROUPS) as SpecialistGroup[]) groups.set(name, []);
     for (const tool of pi.getAllTools()) {
       if (tool.name === "herdr" || tool.name === "subagent") continue;
-      const group = toolGroup(tool.name, `${tool.sourceInfo.source} ${tool.sourceInfo.path}`);
+      const group = specialistGroupForTool(tool.name, `${tool.sourceInfo.source} ${tool.sourceInfo.path}`);
       if (group) groups.get(group)?.push(tool.name);
+      // The Android direct tools do not exist until the MCP adapter has cached
+      // their schemas, so expose the gateway as the group's bootstrap path.
+      if (tool.name === "mcp") {
+        groups.get("android")?.push(tool.name);
+        groups.get("computer")?.push(tool.name);
+      }
     }
     return groups;
   };
@@ -351,16 +403,37 @@ export default function jevControl(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "jev_choose_action",
+    label: "Jev Bounded Choice",
+    description: "Choose one ID from complete Cua Driver action candidates. Include reobserve and abstain. No action is executed; validate the fresh target and verify the result separately. Send only compact, authorized observations to TypeSafe.",
+    parameters: JevChoiceParams,
+    async execute(_toolCallId, params, signal) {
+      const client = getClient();
+      if (!client) return { content: [{ type: "text", text: "Jev is unavailable; reobserve or abstain." }], details: undefined };
+      try {
+        const result = await chooseBoundedAction(client, params, signal);
+        return {
+          content: [{ type: "text", text: `Jev selected ${result.selectedId} (confidence ${result.confidence.toFixed(2)}). No Cua Driver action was executed.` }],
+          details: result,
+        };
+      } catch {
+        return { content: [{ type: "text", text: "Jev choice failed validation or the provider is unavailable; reobserve or abstain." }], details: undefined };
+      }
+    },
+  });
+
+  pi.registerTool({
     name: "jev_find_tools",
     label: "Find Specialist Tools",
     description: "Find and activate the smallest relevant specialist tool groups for a capability. Activation is additive.",
     parameters: FindToolsParams,
     async execute(_toolCallId, params, signal) {
-      let candidates = shortlistGroups(params.query);
+      const required = requiredSpecialistGroups(params.query);
+      let candidates = [...new Set([...required, ...shortlistGroups(params.query)])];
       if (!candidates.length) candidates = Object.keys(SPECIALIST_GROUPS) as SpecialistGroup[];
       let selected = candidates;
       const client = getClient();
-      if (client) {
+      if (client && candidates.length > 1) {
         try {
           const questions = Object.fromEntries(
             candidates.map((group) => [group, noul(`Is the ${SPECIALIST_GROUPS[group].label} group needed for this request?`)]),
@@ -379,6 +452,7 @@ export default function jevControl(pi: ExtensionAPI): void {
       } else {
         selected = shortlistGroups(params.query);
       }
+      selected = [...new Set([...required, ...selected])];
       const activated = activateGroups(selected);
       return {
         content: [
@@ -393,6 +467,33 @@ export default function jevControl(pi: ExtensionAPI): void {
         ],
         details: { selected, activated },
       };
+    },
+  });
+
+  pi.on("tool_call", (event) => {
+    if (isForegroundAllowed()) return;
+    const reason = protectCuaToolCall(event.toolName, event.input as Record<string, unknown>);
+    if (reason) return { block: true, reason: `${reason} Use /cua-focus allow only when the user permits focus changes.` };
+  });
+
+  pi.on("tool_result", (event) => {
+    if (event.isError) return;
+    const handles = cuaWindowHandles(event.toolName, event.details);
+    if (handles) return { content: [...event.content, { type: "text" as const, text: handles }] };
+  });
+
+  pi.registerCommand("cua-focus", {
+    description: "Control Cua Driver focus protection: /cua-focus protect|allow|status",
+    handler: async (args, ctx) => {
+      const action = args.trim() || "status";
+      if (action === "status") {
+        ctx.ui.notify(`Cua Driver focus protection is ${isForegroundAllowed() ? "off" : "on"} for this session.`, "info");
+      } else if (action === "allow" || action === "protect") {
+        setForegroundAllowed(action === "allow");
+        ctx.ui.notify(`Cua Driver focus protection ${isForegroundAllowed() ? "disabled" : "enabled"} for this session.`, "info");
+      } else {
+        ctx.ui.notify("Usage: /cua-focus protect|allow|status", "warning");
+      }
     },
   });
 
@@ -451,6 +552,27 @@ export default function jevControl(pi: ExtensionAPI): void {
     // Reassert the lazy surface after every package has run its own startup
     // hooks. Some packages activate tools during session_start.
     applyToolPolicy();
+    // Explicit specialist requests must be usable on the same turn. Requiring
+    // the model to discover a tool that the request already names can leave
+    // the requested surface hidden for the entire non-interactive run.
+    activateGroups(requiredSpecialistGroups(event.prompt));
+    if (restoreRememberedOnNextPrompt) {
+      restoreRememberedOnNextPrompt = false;
+      const remembered = await loadRememberedModel();
+      const model = remembered ? ctx.modelRegistry.find(remembered.provider, remembered.id) : undefined;
+      if (model) {
+        internalModelTarget = `${model.provider}/${model.id}`;
+        try {
+          const changed = await pi.setModel(model);
+          if (changed && state.routeMode === "auto") {
+            state.routeMode = "off";
+            persist();
+          }
+        } finally {
+          internalModelTarget = undefined;
+        }
+      }
+    }
     if (state.routeMode !== "auto" || !event.prompt.trim()) return;
     const client = getClient();
     if (!client) return;
@@ -471,7 +593,9 @@ export default function jevControl(pi: ExtensionAPI): void {
       );
       const answer = response.answers.tier;
       if (answer.confidence < ROUTE_CONFIDENCE) return;
-      const target = routeTarget(answer.choice);
+      const computerUse = state.activeGroups.includes("computer") ||
+        requiredSpecialistGroups(event.prompt).includes("computer") || shortlistGroups(event.prompt).includes("computer");
+      const target = routeTarget(answer.choice, computerUse);
       const model = ctx.modelRegistry.find("openai-codex", target.id);
       if (!model) return;
       internalModelTarget = `${model.provider}/${model.id}`;
@@ -486,13 +610,18 @@ export default function jevControl(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("model_select", (event, ctx) => {
+  pi.on("model_select", async (event, ctx) => {
     const selected = `${event.model.provider}/${event.model.id}`;
     if (selected === internalModelTarget || event.source === "restore") return;
+    try {
+      await saveRememberedModel({ version: 1, provider: event.model.provider, id: event.model.id });
+    } catch (error) {
+      ctx.ui.notify(`Could not remember model selection: ${errorText(error)}`, "warning");
+    }
     if (state.routeMode === "auto") {
       state.routeMode = "off";
       persist();
-      ctx.ui.notify("Manual model selection disabled Jev routing for this session. Use /jev-route auto to resume.", "info");
+      ctx.ui.notify("Manual model selection was remembered and disabled Jev routing for this session. Use /jev-route auto to resume.", "info");
     }
   });
 
@@ -501,6 +630,10 @@ export default function jevControl(pi: ExtensionAPI): void {
     applyToolPolicy();
     renderWidget(ctx);
   };
-  pi.on("session_start", (_event, ctx) => restore(ctx));
+  pi.on("session_start", async (event, ctx) => {
+    setForegroundAllowed(false);
+    restore(ctx);
+    restoreRememberedOnNextPrompt = event.reason === "new" || event.reason === "startup";
+  });
   pi.on("session_tree", (_event, ctx) => restore(ctx));
 }

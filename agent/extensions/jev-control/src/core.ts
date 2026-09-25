@@ -19,24 +19,38 @@ export interface ControlState {
   activeGroups: SpecialistGroup[];
 }
 
-export type SpecialistGroup = "browser" | "web" | "code" | "mcp";
+export type SpecialistGroup = "android" | "computer" | "web" | "code" | "mcp";
 export type RouteTier = "easy" | "routine" | "demanding" | "hard";
 
 export function isJevDisabled(value: string | undefined): boolean {
   return /^(1|true|yes)$/i.test(value?.trim() ?? "");
 }
 
-export function routeTarget(tier: RouteTier): { id: string; thinking: "low" | "medium" | "high" } {
-  if (tier === "easy") return { id: "gpt-5.6-luna", thinking: "low" };
+export function routeTarget(tier: RouteTier, computerUse = false): { id: string; thinking: "low" | "medium" | "high" } {
+  if (tier === "easy") return { id: computerUse ? "gpt-5.6-sol" : "gpt-5.6-luna", thinking: "low" };
   if (tier === "routine") return { id: "gpt-5.6-sol", thinking: "low" };
   if (tier === "demanding") return { id: "gpt-5.6-sol", thinking: "medium" };
   return { id: "gpt-5.6-sol", thinking: "high" };
 }
 
 export const SPECIALIST_GROUPS: Record<SpecialistGroup, { label: string; keywords: string[] }> = {
-  browser: {
-    label: "interactive browser automation (Browser Use default; Jev fallback)",
-    keywords: ["browser automation", "browser use", "interact", "click", "fill form", "navigate", "operate website"],
+  android: {
+    label: "Android emulator lifecycle, app installation, logs, checkpoints and indexed UI automation",
+    keywords: [
+      "android",
+      "apk",
+      "adb",
+      "emulator",
+      "logcat",
+      "ui automator",
+      "mobile ui",
+      "android screenshot",
+      "android app",
+    ],
+  },
+  computer: {
+    label: "Cua Driver desktop app and background Chrome browser use",
+    keywords: ["computer use", "jev-use", "desktop", "app automation", "browser automation", "browser use", "interact", "click", "fill form", "navigate", "operate website", "screenshot", "window"],
   },
   web: {
     label: "web research and URL retrieval",
@@ -129,6 +143,25 @@ export function shortlistGroups(query: string): SpecialistGroup[] {
   ]>)
     .filter(([, group]) => group.keywords.some((keyword) => normalized.includes(keyword)))
     .map(([name]) => name);
+}
+
+export function requiredSpecialistGroups(query: string): SpecialistGroup[] {
+  return /\b(?:cua_repl_(?:js|reset)|cua_browser_(?:group|page)|cua[ -]driver|browser(?: tab)? group|chrome(?: tab)? group)\b/i.test(query) ||
+    /\b(?:browse|open|inspect|read)\b.{0,60}\b(?:reddit|r\/[a-z0-9_]+|chrome)\b/i.test(query)
+    ? ["computer"]
+    : [];
+}
+
+export function specialistGroupForTool(name: string, source: string): SpecialistGroup | undefined {
+  const value = `${name} ${source}`.toLowerCase();
+  if (name.startsWith("jev-android_") || value.includes("jev-android-automator")) return "android";
+  if (name === "jev_choose_action" || name === "cua_repl_js" || name === "cua_repl_reset" || name === "cua_browser_group" || name === "cua_browser_page" || name.startsWith("cua-driver_") || value.includes("cua-driver") || value.includes("cua-runtime")) return "computer";
+  if (value.includes("pi-web-access") || ["web_search", "fetch_content", "source_check", "get_search_content"].includes(name)) {
+    return "web";
+  }
+  if (value.includes("pi-lens")) return "code";
+  if (value.includes("pi-mcp-adapter") || name === "mcp" || name.startsWith("mcp_")) return "mcp";
+  return undefined;
 }
 
 export function isSpecialistGroup(value: string): value is SpecialistGroup {

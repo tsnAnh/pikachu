@@ -5,7 +5,10 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd -P)"
 SOURCE_AGENT="$REPO_ROOT/agent"
 TARGET_AGENT="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-bold() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+bold() {
+  printf '\n\033[1m==> %s\033[0m\n' "$1"
+  if [ "${PI_CFG_PROGRESS_FD:-}" = "3" ] && [ "$1" != "Done" ]; then printf 'Pi preflight: %s\n' "$1" >&3; fi
+}
 ok() { printf '    \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
@@ -19,6 +22,10 @@ while [ "$#" -gt 0 ]; do
 done
 case "$TARGET_AGENT" in ""|"/"|"$HOME"|"${HOME}/") die "Refusing unsafe target: ${TARGET_AGENT:-<empty>}" ;; esac
 for command in node npm rsync git python3 uv; do command -v "$command" >/dev/null 2>&1 || die "'$command' is required"; done
+command -v cua-driver >/dev/null 2>&1 || die "Cua Driver is required; install it from https://cua.ai/docs/how-to-guides/driver/install"
+CUA_DRIVER_VERSION="$(cua-driver --version | awk '{print $2}')"
+node -e 'const [major,minor,patch]=process.argv[1].split(".").map(Number);if(!Number.isInteger(major)||!Number.isInteger(minor)||!Number.isInteger(patch)||major<0||(major===0&&(minor<28||(minor===28&&patch<2))))process.exit(1)' "$CUA_DRIVER_VERSION" ||
+  die "Cua Driver >=0.28.2 is required (found $CUA_DRIVER_VERSION)"
 python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' || die "Python 3.12 or newer is required"
 resolve_pi_bin() {
   if [ -n "${PI_CFG_REAL_PI:-}" ] && [ -x "$PI_CFG_REAL_PI" ]; then printf '%s\n' "$PI_CFG_REAL_PI"; return 0; fi
@@ -51,9 +58,9 @@ elif command -v security >/dev/null 2>&1 &&
   unset STORED_TYPESAFE_KEY
   ok "TYPESAFE_API_KEY loaded from macOS Keychain"
 elif [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ] || [ ! -t 0 ]; then
-  warn "Jev is not configured; Pi will use the active coding model for native compaction"
+  warn "Jev is not configured; model routing and specialist judgments will use deterministic fallbacks"
 elif command -v security >/dev/null 2>&1; then
-  printf '    Enable optional Jev decisions and compaction? [y/N]: '
+  printf '    Enable optional Jev routing and specialist decisions? [y/N]: '
   IFS= read -r ENABLE_JEV
   case "$ENABLE_JEV" in
     y|Y|yes|YES|Yes)
@@ -67,11 +74,11 @@ elif command -v security >/dev/null 2>&1; then
         unset TYPESAFE_KEY_INPUT
         ok "TYPESAFE_API_KEY saved in macOS Keychain"
       else
-        warn "Jev setup cancelled; Pi will use the active coding model for native compaction"
+        warn "Jev setup cancelled; deterministic fallbacks remain available"
       fi
       ;;
     *)
-      ok "Jev skipped; Pi will use the active coding model for native compaction"
+      ok "Jev skipped; deterministic fallbacks remain available"
       ;;
   esac
   unset ENABLE_JEV
@@ -80,7 +87,7 @@ else
 fi
 
 bold "Validating repository configuration"
-for file in settings.json jev.json zentui.json; do
+for file in settings.json zentui.json android-automator.json; do
   node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))' "$SOURCE_AGENT/$file"
   ok "$file"
 done
@@ -90,6 +97,18 @@ for file in models.json mcp.json; do
     ok "$file"
   fi
 done
+node - "$SOURCE_AGENT/android-automator.json" <<'NODE'
+const value=JSON.parse(require("node:fs").readFileSync(process.argv[2],"utf8"));
+const sha=/^[a-f0-9]{64}$/;
+const agent=/^[a-z][a-z0-9-]{0,62}$/;
+if(value.version!==1||typeof value.packageVersion!=="string"||!value.packageVersion||
+  typeof value.wheelFile!=="string"||!/^jev_android_automator-[A-Za-z0-9_.-]+\.whl$/.test(value.wheelFile)||
+  typeof value.wheelSha256!=="string"||!sha.test(value.wheelSha256)||
+  typeof value.sourcePath!=="string"||!value.sourcePath||typeof value.agentId!=="string"||!agent.test(value.agentId)){
+  console.error("android-automator.json is invalid");process.exit(1);
+}
+NODE
+ok "Android automator release metadata"
 node - "$SOURCE_AGENT/settings.json" <<'NODE'
 const settings=JSON.parse(require("node:fs").readFileSync(process.argv[2],"utf8"));
 const errors=[];
@@ -142,23 +161,41 @@ sync_directory() {
   [ -d "$source" ] || return 0
   local destination="$TARGET_AGENT/$relative"
   if [ -d "$destination" ] &&
-    diff -qr --exclude node_modules --exclude .venv --exclude .upstream --exclude .browser-use-upstream --exclude __pycache__ --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
+    diff -qr --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude .DS_Store "$source" "$destination" >/dev/null 2>&1; then return 0; fi
   backup_path "$relative"; mkdir -p "$destination"
-  rsync -a --delete --exclude node_modules --exclude .venv --exclude .upstream --exclude .browser-use-upstream --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store "$source/" "$destination/" ||
+  rsync -a --delete --exclude node_modules --exclude .venv --exclude .upstream --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store "$source/" "$destination/" ||
     die "Failed to sync $relative"
   ok "synced $relative"
 }
 
 if [ "$SOURCE_AGENT_REAL" != "$TARGET_AGENT" ]; then
   bold "Syncing repo-owned configuration"
-  for file in settings.json models.json mcp.json jev.json zentui.json; do sync_file "$file"; done
-  for extension in context.ts plan-mode.ts delegation-mode.ts jev-control jev-browser; do
+  for file in AGENTS.md settings.json models.json mcp.json zentui.json android-automator.json; do sync_file "$file"; done
+  for extension in context.ts plan-mode.ts delegation-mode.ts jev-control cua-runtime; do
     if [ -d "$SOURCE_AGENT/extensions/$extension" ]; then sync_directory "extensions/$extension"
     else sync_file "extensions/$extension"; fi
   done
-  retired="extensions/pi-rtk-optimizer"
-  if [ -e "$TARGET_AGENT/$retired" ]; then
-    backup_path "$retired"; rm -rf "$TARGET_AGENT/$retired"; ok "retired $retired"
+  sync_directory "browser-group"
+  sync_directory "skills/test-audit"
+  sync_directory "skills/jev-use"
+  sync_directory "skills/gui-automation"
+  for retired in extensions/pi-rtk-optimizer extensions/jev-browser jev.json; do
+    if [ -e "$TARGET_AGENT/$retired" ]; then
+      mkdir -p "$(dirname "$BACKUP_ROOT/$retired")"
+      mv "$TARGET_AGENT/$retired" "$BACKUP_ROOT/$retired" || die "Failed to retire $retired"
+      BACKUP_CREATED=1
+      ok "retired $retired"
+    fi
+  done
+  if [ "$TARGET_AGENT" = "$HOME/.pi/agent" ]; then
+    old_agent="$HOME/Library/LaunchAgents/com.pikachu.jev-browser.plist"
+    if [ -f "$old_agent" ]; then
+      launchctl bootout "gui/$(id -u)/com.pikachu.jev-browser" >/dev/null 2>&1 || true
+      mkdir -p "$BACKUP_ROOT/launch-agents"
+      mv "$old_agent" "$BACKUP_ROOT/launch-agents/com.pikachu.jev-browser.plist"
+      BACKUP_CREATED=1
+      ok "retired CloakBrowser LaunchAgent"
+    fi
   fi
 else
   ok "source is the live agent directory; no copy required"
@@ -171,97 +208,69 @@ for pkg in "$TARGET_AGENT"/extensions/*/package.json; do
   (cd "$dir" && npm ci --omit=dev --no-audit --no-fund --silent); ok "$(basename "$dir")"
 done
 
-bold "Installing complete Jev Ultrafast checkout"
-JEV_BROWSER_DIR="$TARGET_AGENT/extensions/jev-browser"
-JEV_ULTRAFAST_REF="1231850a0bf1a0c0341fe408ef1668dbbfdfac46"
-JEV_ULTRAFAST_DIR="$JEV_BROWSER_DIR/.upstream"
-JEV_BROWSER_PYTHON="$JEV_ULTRAFAST_DIR/.venv/bin/python"
-if [ -d "$JEV_BROWSER_DIR/.venv" ]; then rm -rf "$JEV_BROWSER_DIR/.venv"; ok "retired package-only Jev runtime"; fi
-if [ ! -d "$JEV_ULTRAFAST_DIR/.git" ]; then
-  rm -rf "$JEV_ULTRAFAST_DIR"
-  git clone --no-checkout --filter=blob:none https://github.com/browser-use/jev-ultrafast.git "$JEV_ULTRAFAST_DIR" >/dev/null 2>&1 ||
-    die "Failed to clone Jev Ultrafast"
-fi
-git -C "$JEV_ULTRAFAST_DIR" fetch --depth 1 origin "$JEV_ULTRAFAST_REF" >/dev/null 2>&1 ||
-  die "Failed to fetch pinned Jev Ultrafast commit"
-git -C "$JEV_ULTRAFAST_DIR" checkout --detach --force "$JEV_ULTRAFAST_REF" >/dev/null 2>&1 ||
-  die "Failed to check out pinned Jev Ultrafast commit"
-git -C "$JEV_ULTRAFAST_DIR" clean -fd >/dev/null 2>&1 || die "Failed to clean Jev Ultrafast checkout"
-[ "$(git -C "$JEV_ULTRAFAST_DIR" rev-parse HEAD)" = "$JEV_ULTRAFAST_REF" ] || die "Jev Ultrafast checkout verification failed"
-git -C "$JEV_ULTRAFAST_DIR" apply --unidiff-zero "$JEV_BROWSER_DIR/patches/navigation-settle.patch" ||
-  die "Failed to apply Jev Ultrafast navigation-settle patch"
-uv sync --frozen --no-dev --project "$JEV_ULTRAFAST_DIR" --quiet
-"$JEV_BROWSER_PYTHON" -c 'import jev_ultrafast; import browser_harness' || die "Jev browser runtime import check failed"
-ok "complete jev-ultrafast checkout @ $JEV_ULTRAFAST_REF"
-
-
-bold "Installing complete Browser Use checkout"
-BROWSER_USE_REF="d8110c5ff87ccba887aaa726cdb780f2f84bef8d"
-BROWSER_USE_DIR="$JEV_BROWSER_DIR/.browser-use-upstream"
-BROWSER_USE_PYTHON="$BROWSER_USE_DIR/.venv/bin/python"
-if [ ! -d "$BROWSER_USE_DIR/.git" ]; then
-  rm -rf "$BROWSER_USE_DIR"
-  git clone --no-checkout --filter=blob:none https://github.com/browser-use/browser-use.git "$BROWSER_USE_DIR" >/dev/null 2>&1 ||
-    die "Failed to clone Browser Use"
-fi
-git -C "$BROWSER_USE_DIR" fetch --depth 1 origin "$BROWSER_USE_REF" >/dev/null 2>&1 || die "Failed to fetch pinned Browser Use commit"
-git -C "$BROWSER_USE_DIR" checkout --detach --force "$BROWSER_USE_REF" >/dev/null 2>&1 || die "Failed to check out pinned Browser Use commit"
-git -C "$BROWSER_USE_DIR" clean -fd >/dev/null 2>&1 || die "Failed to clean Browser Use checkout"
-[ "$(git -C "$BROWSER_USE_DIR" rev-parse HEAD)" = "$BROWSER_USE_REF" ] || die "Browser Use checkout verification failed"
-cp "$JEV_BROWSER_DIR/browser-use.uv.lock" "$BROWSER_USE_DIR/uv.lock" || die "Failed to install reviewed Browser Use lockfile"
-uv sync --frozen --no-dev --python 3.12 --project "$BROWSER_USE_DIR" --quiet
-"$BROWSER_USE_PYTHON" -c 'from browser_use import Agent, BrowserSession; from browser_use.llm.base import BaseChatModel' || die "Browser Use runtime import check failed"
-ok "complete browser-use checkout @ $BROWSER_USE_REF"
-bold "Installing bundled CloakBrowser"
-"$JEV_BROWSER_DIR/node_modules/.bin/cloakbrowser" install >/dev/null
-ok "CloakBrowser binary"
-BUNDLED_BROWSER_URL="http://127.0.0.1:9223"
-DEFAULT_LIVE_AGENT="$HOME/.pi/agent"
-if [ "$TARGET_AGENT" = "$DEFAULT_LIVE_AGENT" ]; then
-  BROWSER_STATE_DIR="$HOME/.local/share/pikachu/jev-browser"
-  BROWSER_LOG_DIR="$HOME/.cache/pikachu"
-  LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.pikachu.jev-browser.plist"
-  mkdir -p "$BROWSER_STATE_DIR" "$BROWSER_LOG_DIR" "$(dirname "$LAUNCH_AGENT")"
-  chmod 700 "$BROWSER_STATE_DIR"
-  node - "$LAUNCH_AGENT" "$(command -v node)" "$JEV_BROWSER_DIR/chromium-host.mjs" "$BROWSER_STATE_DIR" "$BROWSER_LOG_DIR" <<'NODE'
-const fs = require("node:fs");
-const [plist, node, script, state, logs] = process.argv.slice(2);
-const esc = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>com.pikachu.jev-browser</string>
-<key>ProgramArguments</key><array><string>${esc(node)}</string><string>${esc(script)}</string></array>
-<key>EnvironmentVariables</key><dict>
-<key>JEV_BROWSER_STATE_DIR</key><string>${esc(state)}</string>
-<key>JEV_BROWSER_CDP_PORT</key><string>9223</string>
-</dict>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-<key>StandardOutPath</key><string>${esc(logs)}/jev-browser.log</string>
-<key>StandardErrorPath</key><string>${esc(logs)}/jev-browser-error.log</string>
-</dict></plist>\n`;
-fs.writeFileSync(plist, xml, { mode: 0o600 });
-NODE
-  launchctl bootout "gui/$(id -u)/com.pikachu.jev-browser" >/dev/null 2>&1 || true
-  for _ in $(seq 1 50); do
-    launchctl print "gui/$(id -u)/com.pikachu.jev-browser" >/dev/null 2>&1 || break
-    sleep 0.1
-  done
-  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT" >/dev/null
-  for _ in $(seq 1 50); do curl -fsS "$BUNDLED_BROWSER_URL/json/version" >/dev/null 2>&1 && break; sleep 0.1; done
-  curl -fsS "$BUNDLED_BROWSER_URL/json/version" >/dev/null 2>&1 || die "CloakBrowser did not expose CDP on port 9223"
-  ok "persistent CloakBrowser"
-else
-  warn "Bundled Chromium LaunchAgent is installed only for the live ~/.pi/agent profile"
-fi
-if ! BU_NAME=pikachu-chromium BU_CDP_URL="$BUNDLED_BROWSER_URL" "$JEV_BROWSER_PYTHON" -c 'from browser_harness.admin import ensure_daemon; ensure_daemon()' >/dev/null 2>&1; then
-  if [ "${PI_CFG_UPDATE_RUNNING:-0}" = "1" ] || [ "$TARGET_AGENT" != "$DEFAULT_LIVE_AGENT" ]; then
-    warn "Bundled Chromium is installed but its Browser Harness daemon is not active"
-  else
-    die "Browser Harness could not connect to CloakBrowser at $BUNDLED_BROWSER_URL"
+bold "Installing Jev Android Automator runtime"
+ANDROID_CONFIG="$TARGET_AGENT/android-automator.json"
+ANDROID_RUNTIME="$TARGET_AGENT/runtimes/jev-android-automator"
+ANDROID_SOURCE_RAW="${JEV_ANDROID_AUTOMATOR_SOURCE:-$(node -e 'const v=require(process.argv[1]);process.stdout.write(v.sourcePath)' "$ANDROID_CONFIG")}"
+case "$ANDROID_SOURCE_RAW" in
+  "~/"*) ANDROID_SOURCE="$HOME/${ANDROID_SOURCE_RAW#\~/}" ;;
+  /*) ANDROID_SOURCE="$ANDROID_SOURCE_RAW" ;;
+  *) die "android-automator.json sourcePath must be absolute or start with ~/" ;;
+esac
+ANDROID_WHEEL_FILE="$(node -e 'const v=require(process.argv[1]);process.stdout.write(v.wheelFile)' "$ANDROID_CONFIG")"
+ANDROID_WHEEL_SHA="$(node -e 'const v=require(process.argv[1]);process.stdout.write(v.wheelSha256)' "$ANDROID_CONFIG")"
+ANDROID_PACKAGE_VERSION="$(node -e 'const v=require(process.argv[1]);process.stdout.write(v.packageVersion)' "$ANDROID_CONFIG")"
+ANDROID_WHEEL="$ANDROID_SOURCE/dist/$ANDROID_WHEEL_FILE"
+ANDROID_PYTHON="$ANDROID_RUNTIME/.venv/bin/python"
+ANDROID_MARKER="$ANDROID_RUNTIME/.install-fingerprint"
+if [ -f "$ANDROID_WHEEL" ] && [ -f "$ANDROID_SOURCE/uv.lock" ] && [ -f "$ANDROID_SOURCE/pyproject.toml" ]; then
+  ACTUAL_ANDROID_SHA="$(node -e '
+const fs=require("node:fs"),crypto=require("node:crypto");
+process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));
+' "$ANDROID_WHEEL")"
+  [ "$ACTUAL_ANDROID_SHA" = "$ANDROID_WHEEL_SHA" ] || die "Jev Android Automator wheel checksum does not match android-automator.json"
+  ACTUAL_ANDROID_VERSION="$(node -e '
+const text=require("node:fs").readFileSync(process.argv[1],"utf8");
+const match=/^version\s*=\s*"([^"]+)"/m.exec(text);if(!match)process.exit(1);process.stdout.write(match[1]);
+' "$ANDROID_SOURCE/pyproject.toml")"
+  [ "$ACTUAL_ANDROID_VERSION" = "$ANDROID_PACKAGE_VERSION" ] || die "Jev Android Automator source version does not match android-automator.json"
+  ANDROID_FINGERPRINT="$(node -e '
+const fs=require("node:fs"),crypto=require("node:crypto"),hash=crypto.createHash("sha256");
+for(const path of process.argv.slice(1))hash.update(fs.readFileSync(path));process.stdout.write(hash.digest("hex"));
+' "$ANDROID_WHEEL" "$ANDROID_SOURCE/uv.lock")"
+  INSTALLED_ANDROID_FINGERPRINT="$(sed -n '1p' "$ANDROID_MARKER" 2>/dev/null || true)"
+  if [ "$INSTALLED_ANDROID_FINGERPRINT" != "$ANDROID_FINGERPRINT" ] ||
+    ! "$ANDROID_PYTHON" -c 'import jev_android_automator' >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$ANDROID_RUNTIME")"
+    ANDROID_TEMP="$(mktemp -d "${ANDROID_RUNTIME}.install.XXXXXX")"
+    if ! (
+      set -e
+      uv export --frozen --no-dev --no-emit-project --project "$ANDROID_SOURCE" --output-file "$ANDROID_TEMP/requirements.txt" --quiet
+      uv venv --python 3.12 "$ANDROID_TEMP/.venv" --quiet
+      uv pip sync --python "$ANDROID_TEMP/.venv/bin/python" "$ANDROID_TEMP/requirements.txt" --quiet
+      uv pip install --python "$ANDROID_TEMP/.venv/bin/python" --no-deps "$ANDROID_WHEEL" --quiet
+      "$ANDROID_TEMP/.venv/bin/python" -c 'import jev_android_automator'
+      rm -f "$ANDROID_TEMP/requirements.txt"
+      printf '%s\n' "$ANDROID_FINGERPRINT" > "$ANDROID_TEMP/.install-fingerprint"
+    ); then
+      rm -rf "$ANDROID_TEMP"
+      die "Failed to build the Jev Android Automator runtime"
+    fi
+    ANDROID_PREVIOUS="${ANDROID_RUNTIME}.previous.$$"
+    if [ -d "$ANDROID_RUNTIME" ]; then mv "$ANDROID_RUNTIME" "$ANDROID_PREVIOUS"; fi
+    if mv "$ANDROID_TEMP" "$ANDROID_RUNTIME"; then
+      if [ -d "$ANDROID_PREVIOUS" ]; then rm -rf "$ANDROID_PREVIOUS"; fi
+    else
+      if [ -d "$ANDROID_PREVIOUS" ]; then mv "$ANDROID_PREVIOUS" "$ANDROID_RUNTIME"; fi
+      die "Failed to activate the Jev Android Automator runtime"
+    fi
   fi
+  "$ANDROID_PYTHON" -c 'import importlib.metadata as m, jev_android_automator; assert m.version("jev-android-automator") == "'"$ANDROID_PACKAGE_VERSION"'"'
+  ok "jev-android-automator@$ANDROID_PACKAGE_VERSION ($ANDROID_WHEEL_SHA)"
+elif [ -x "$ANDROID_PYTHON" ] && "$ANDROID_PYTHON" -c 'import jev_android_automator' >/dev/null 2>&1; then
+  warn "Jev Android Automator source is unavailable at $ANDROID_SOURCE; preserving the installed runtime"
 else
-  ok "Browser Harness connected to CloakBrowser without Chrome permission prompts"
+  warn "Jev Android Automator source is unavailable at $ANDROID_SOURCE; Android tools will remain unavailable"
 fi
 
 bold "Materializing exact npm package set"
@@ -293,6 +302,8 @@ PI_CODING_AGENT_DIR="$TARGET_AGENT" "$PI_BIN" list
 LIVE_AGENT="$HOME/.pi/agent"
 if [ -d "$LIVE_AGENT" ]; then LIVE_AGENT="$(cd "$LIVE_AGENT" && pwd -P)"; fi
 if [ "$TARGET_AGENT" = "$LIVE_AGENT" ]; then
+  bold "Installing Chrome CUA bridge"
+  PI_CODING_AGENT_DIR="$TARGET_AGENT" scripts/install-browser-group.sh
   bold "Installing Pi startup preflight"
   scripts/install-pi-launcher.sh
 fi

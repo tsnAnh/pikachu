@@ -4,7 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd -P)"
 TARGET_AGENT="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-bold() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+bold() {
+  printf '\n\033[1m==> %s\033[0m\n' "$1"
+  if [ "${PI_CFG_PROGRESS_FD:-}" = "3" ] && [ "$1" != "Done" ]; then printf 'Pi preflight: %s\n' "$1" >&3; fi
+}
 ok() { printf '    \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$1" >&2; }
 

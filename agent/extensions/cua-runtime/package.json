@@ -1,16 +1,18 @@
 {
-  "name": "pi-cfg-jev-browser",
+  "name": "pi-cfg-cua-runtime",
   "version": "1.0.0",
   "private": true,
-  "description": "Persistent CloakBrowser automation with Browser Use default and Jev fallback",
   "type": "module",
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "cloakbrowser": "0.5.10",
-    "playwright-core": "1.63.0",
+    "@modelcontextprotocol/sdk": "1.30.1",
+    "acorn": "8.15.0",
+    "ajv": "8.20.0",
+    "astring": "1.9.0",
+    "quickjs-emscripten": "0.32.0",
     "typebox": "1.1.38"
   },
   "devDependencies": {
@@ -19,5 +21,10 @@
     "@types/node": "22.19.1",
     "tsx": "4.20.6",
     "typescript": "5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
   }
 }

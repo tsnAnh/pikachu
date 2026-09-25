@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Pikachu Browser Use",
+  "version": "2.0.1",
+  "description": "Provides focus-protected browser lifecycle and exact-tab control for Pi.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2ZBHXokWomlqG5u/+aotoLjQqEbSPKAgZdsYv0LnpT4pjjYLXfVN+wW2gi7WlrzRj3T89ViMYgutlWnITu/VWqp9dGhUgq4sCPUsryGTqrp9T0XvLxvGkFXkiXogXT9sP/rC0DphxsAzgLXC6f8AHRndEXURpWVrggjK0hzgikCjQcw3b5nf08SxBFfm5knLoD9lNZUtODMSNOt7+4CoqakRgvmeqNC+sRqPeCNjZcDb2Jvu7UKUw8Usc9hWFcY4rO8GKySPpdbjY8IiLycJCkGA6ET3glaHjDFlOmnZkPZp/khQ738IxE9GjkhcZ8KhydLMDMpqbwlMYcFvB3WF2QIDAQAB",
+  "permissions": ["tabs", "windows", "tabGroups", "bookmarks", "nativeMessaging", "storage", "debugger"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  }
+}
