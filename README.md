@@ -37,7 +37,7 @@ version and SHA-256 in [`agent/android-automator.json`](agent/android-automator.
 
 The default profile uses the dark theme, `openai-codex/gpt-5.6-luna`, and low thinking. The model
 picker includes the configured OpenAI Codex models. The local catalog metadata advertises a
-1,000,000-token context window for `gpt-6-luna` and 500,000 tokens for `gpt-6-sol`. MCP endpoints
+1,000,000-token context window for `gpt-6-astra` and `gpt-6-luna`, and 500,000 tokens for `gpt-6-sol`. MCP endpoints
 are defined without credentials in
 [`agent/mcp.json`](agent/mcp.json); OAuth credentials remain in Pi's credential storage.
 
